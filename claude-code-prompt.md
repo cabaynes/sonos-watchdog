@@ -20,12 +20,13 @@ Copy everything between the `---` markers and paste it as your first message in 
 
 ---
 
-I want to install the **Sonos Watchdog** system in my Home Assistant setup. It's a two-automation system that auto-rejoins Sonos speakers when they drop out of an actively playing group. The blueprints live at:
+I want to install the **Sonos Watchdog** system in my Home Assistant setup. It's a three-automation system that auto-rejoins Sonos speakers when they drop out of an actively playing group, and re-runs the active music script if the master speaker itself dies. The blueprints live at:
 
-- `https://raw.githubusercontent.com/your-org/sonos-watchdog/main/blueprints/sonos_watchdog_recovery.yaml`
-- `https://raw.githubusercontent.com/your-org/sonos-watchdog/main/blueprints/sonos_watchdog_sweep.yaml`
+- https://raw.githubusercontent.com/cabaynes/sonos-watchdog/main/blueprints/sonos_watchdog_recovery.yaml
+- https://raw.githubusercontent.com/cabaynes/sonos-watchdog/main/blueprints/sonos_watchdog_sweep.yaml
+- https://raw.githubusercontent.com/cabaynes/sonos-watchdog/main/blueprints/sonos_watchdog_master_failover.yaml
 
-(If those URLs aren't yet hosted, the blueprint YAML is also in this folder under `docs/sonos-watchdog/blueprints/`.)
+The full README is at https://github.com/cabaynes/sonos-watchdog — read it first for context on the architecture and the music-script structure required for failover to work.
 
 **Please:**
 

@@ -19,7 +19,7 @@ blueprint:
     in 4–8 seconds; the sweep catches the quieter "speaker stays online but
     drops out of the group" failure mode.
   domain: automation
-  source_url: https://github.com/your-org/sonos-watchdog/blueprints/sonos_watchdog_recovery.yaml
+  source_url: https://github.com/cabaynes/sonos-watchdog/blob/main/blueprints/sonos_watchdog_recovery.yaml
   input:
     sonos_speakers:
       name: Sonos speakers

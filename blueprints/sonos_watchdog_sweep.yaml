@@ -19,7 +19,7 @@ blueprint:
     evaluation against entity states) — going below 10s is technically
     fine but adds log noise without meaningful benefit for most setups.
   domain: automation
-  source_url: https://github.com/your-org/sonos-watchdog/blueprints/sonos_watchdog_sweep.yaml
+  source_url: https://github.com/cabaynes/sonos-watchdog/blob/main/blueprints/sonos_watchdog_sweep.yaml
   input:
     sonos_speakers:
       name: All Sonos speakers

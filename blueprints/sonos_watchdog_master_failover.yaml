@@ -26,7 +26,7 @@ blueprint:
     A 5-second delay before re-running lets the Sonos network settle
     after the master's death (avoids join storms).
   domain: automation
-  source_url: https://github.com/your-org/sonos-watchdog/blueprints/sonos_watchdog_master_failover.yaml
+  source_url: https://github.com/cabaynes/sonos-watchdog/blob/main/blueprints/sonos_watchdog_master_failover.yaml
   input:
     master_priority_speakers:
       name: Master-eligible speakers
