@@ -1,0 +1,94 @@
+blueprint:
+  name: Sonos Watchdog — Speaker Recovery
+  description: >
+    When any monitored Sonos speaker recovers from `unavailable` to a healthy
+    state AND there's an active Sonos master playing a group, auto-join the
+    recovered speaker and match the master's current volume.
+
+    Master is detected dynamically (whichever Sonos speaker has
+    `group_members[0] == self`, length > 1, and state == 'playing'), so this
+    works regardless of whether playback was started by an HA script,
+    Sonos Voice, or the Sonos app.
+
+    A short delay before joining lets Sonos finish post-reconnect bootstrap.
+    Sending join too fast often fails because the speaker isn't yet ready
+    to receive control commands.
+
+    Pair this with the "Sonos Watchdog — Periodic Group Sweep" blueprint
+    for full coverage. Recovery handles `unavailable → healthy` transitions
+    in 4–8 seconds; the sweep catches the quieter "speaker stays online but
+    drops out of the group" failure mode.
+  domain: automation
+  source_url: https://github.com/your-org/sonos-watchdog/blueprints/sonos_watchdog_recovery.yaml
+  input:
+    sonos_speakers:
+      name: Sonos speakers
+      description: >
+        Every Sonos media_player entity in your home that should be monitored
+        for recovery. The recovery automation watches all of these for the
+        unavailable→healthy transition.
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+    recovery_delay:
+      name: Recovery delay (seconds)
+      description: >
+        How long to wait after a speaker recovers before joining it to the
+        active group. Sonos speakers are reachable on the network slightly
+        before they accept control commands; 3 seconds is the sweet spot for
+        most setups. Increase to 5–8 seconds if you have very slow Wi-Fi or
+        see frequent failed joins after recoveries.
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 30
+          unit_of_measurement: seconds
+
+variables:
+  sonos_all: !input sonos_speakers
+  current_master: >-
+    {%- set ns = namespace(m=none) -%}
+    {%- for s in sonos_all -%}
+      {%- set members = state_attr(s, 'group_members') or [] -%}
+      {%- if is_state(s, 'playing') and members and members[0] == s and (members | length) > 1 -%}
+        {%- set ns.m = s -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{ ns.m }}
+
+triggers:
+  - trigger: state
+    entity_id: !input sonos_speakers
+    from: 'unavailable'
+    to:
+      - 'idle'
+      - 'playing'
+      - 'paused'
+
+conditions:
+  - condition: template
+    value_template: "{{ current_master is not none and trigger.entity_id != current_master }}"
+
+actions:
+  - delay:
+      seconds: !input recovery_delay
+  - action: media_player.join
+    data:
+      group_members:
+        - "{{ trigger.entity_id }}"
+    target:
+      entity_id: "{{ current_master }}"
+  - action: media_player.volume_set
+    data:
+      volume_level: "{{ state_attr(current_master, 'volume_level') }}"
+    target:
+      entity_id: "{{ trigger.entity_id }}"
+  - action: logbook.log
+    data:
+      name: Sonos Watchdog
+      message: "Recovery: rejoined {{ trigger.entity_id }} to {{ current_master }} after unavailable→{{ trigger.to_state.state }} transition"
+
+mode: parallel
+max: 5

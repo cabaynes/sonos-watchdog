@@ -1,0 +1,100 @@
+blueprint:
+  name: Sonos Watchdog — Master Failover
+  description: >
+    When the current playing Sonos master goes `unavailable`, re-run the
+    last-active music script — which (assuming it has master-priority
+    logic) elects a new master and reforms the group.
+
+    Without this, a master speaker dying mid-playback kills the whole
+    session: the Sonos queue lives on the master, so when it dies the
+    rest of the group falls idle.
+
+    **Required setup on your end:**
+
+    1. Create an `input_text` helper named `sonos_active_script` (via UI or
+       YAML). Default value empty string.
+    2. In each of your music scripts (the ones that start playback on
+       Sonos), add a step at the beginning that sets `input_text.sonos_active_script`
+       to the script's own name (e.g. `"play_dinner_jazz"`). That tells
+       the failover which script to re-run.
+    3. Each music script must have its own master-priority logic that
+       picks a new master if the preferred one is unavailable. Otherwise
+       failover will fail (script will try to play on the dead master).
+
+    See the project README for the recommended music-script structure.
+
+    A 5-second delay before re-running lets the Sonos network settle
+    after the master's death (avoids join storms).
+  domain: automation
+  source_url: https://github.com/your-org/sonos-watchdog/blueprints/sonos_watchdog_master_failover.yaml
+  input:
+    master_priority_speakers:
+      name: Master-eligible speakers
+      description: >
+        Sonos speakers that can be the master of a playing group. Order
+        doesn't matter here — your music scripts contain their own
+        priority order. This list defines which speakers, when going
+        unavailable, should trigger a failover. Typically: every Sonos
+        speaker that's "stationary" enough to be a master (excludes
+        portable speakers like Roam/Move that frequently come and go).
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+    failover_delay:
+      name: Failover delay (seconds)
+      description: >
+        How long to wait after the master dies before re-running the
+        active script. Long enough for the network to settle so the
+        replay doesn't hit a brownout state.
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          unit_of_measurement: seconds
+    active_script_helper:
+      name: Active-script helper entity
+      description: >
+        Entity ID of the `input_text` helper that tracks which music
+        script is currently active. Your music scripts must set this
+        helper's value to their own script name (without the `script.`
+        prefix) at the start of their sequence. The failover reads from
+        this helper to know which script to re-run.
+      default: input_text.sonos_active_script
+      selector:
+        entity:
+          domain: input_text
+
+variables:
+  active_script_helper: !input active_script_helper
+  last_active_script: "{{ states(active_script_helper) }}"
+  failover_delay: !input failover_delay
+
+triggers:
+  - trigger: state
+    entity_id: !input master_priority_speakers
+    to: 'unavailable'
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ last_active_script != ''
+         and trigger.from_state.state == 'playing'
+         and trigger.from_state.attributes.group_members
+         and trigger.from_state.attributes.group_members[0] == trigger.entity_id
+         and (trigger.from_state.attributes.group_members | length) > 1 }}
+
+actions:
+  - action: logbook.log
+    data:
+      name: Sonos Watchdog
+      message: "Master failover: {{ trigger.entity_id }} went unavailable while playing; re-running script.{{ last_active_script }} to elect a new master"
+  - delay:
+      seconds: !input failover_delay
+  - action: script.turn_on
+    target:
+      entity_id: "script.{{ last_active_script }}"
+
+mode: single
+max_exceeded: silent

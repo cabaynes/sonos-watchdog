@@ -1,0 +1,113 @@
+blueprint:
+  name: Sonos Watchdog — Periodic Group Sweep
+  description: >
+    Every N seconds, check whether any Sonos master is playing a group. If
+    so, look for candidate speakers that are online and idle but NOT in the
+    active group, and join them in. Catches the "speaker stays online but
+    quietly drops out of the group" failure mode that the recovery-edge
+    automation can't catch (since the speaker never went `unavailable`).
+
+    Skips speakers that are doing their own thing (any state other than
+    `idle`), so a separate session — e.g. someone using the bedroom Sonos
+    for a podcast — is left alone.
+
+    Pair this with the "Sonos Watchdog — Speaker Recovery" blueprint for
+    full coverage. Recovery handles `unavailable → healthy` transitions in
+    4–8 seconds; the sweep handles silent drops within the chosen interval.
+
+    Recommended interval: 10–15 seconds. The sweep is cheap (just template
+    evaluation against entity states) — going below 10s is technically
+    fine but adds log noise without meaningful benefit for most setups.
+  domain: automation
+  source_url: https://github.com/your-org/sonos-watchdog/blueprints/sonos_watchdog_sweep.yaml
+  input:
+    sonos_speakers:
+      name: All Sonos speakers
+      description: >
+        Every Sonos media_player entity in your home. Used internally to
+        detect which speaker is currently the playing master.
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+    candidates:
+      name: Auto-join candidates
+      description: >
+        Speakers eligible for auto-join when they fall out of the active
+        group. Usually a subset of the full Sonos speaker list — exclude
+        any speaker you don't want pulled into a group automatically (e.g.
+        a kid's bedroom you don't want music in unless explicitly chosen).
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+    sweep_interval:
+      name: Sweep interval
+      description: >
+        How often to check for fragmentation. 10–15 seconds is recommended.
+        Lower values are technically fine (the sweep is cheap) but add log
+        noise without meaningful benefit for most setups.
+      default: "/15"
+      selector:
+        select:
+          options:
+            - label: "Every 5 seconds (aggressive)"
+              value: "/5"
+            - label: "Every 10 seconds"
+              value: "/10"
+            - label: "Every 15 seconds (recommended)"
+              value: "/15"
+            - label: "Every 20 seconds"
+              value: "/20"
+            - label: "Every 30 seconds (conservative)"
+              value: "/30"
+
+variables:
+  candidates: !input candidates
+  sonos_all: !input sonos_speakers
+  current_master: >-
+    {%- set ns = namespace(m=none) -%}
+    {%- for s in sonos_all -%}
+      {%- set members = state_attr(s, 'group_members') or [] -%}
+      {%- if is_state(s, 'playing') and members and members[0] == s and (members | length) > 1 -%}
+        {%- set ns.m = s -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{ ns.m }}
+  current_group: "{{ state_attr(current_master, 'group_members') if current_master else [] }}"
+  missing: >-
+    {%- set ns = namespace(m=[]) -%}
+    {%- if current_master -%}
+      {%- for s in candidates -%}
+        {%- if s != current_master and s not in current_group and is_state(s, 'idle') -%}
+          {%- set ns.m = ns.m + [s] -%}
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+    {{ ns.m }}
+
+triggers:
+  - trigger: time_pattern
+    seconds: !input sweep_interval
+
+conditions:
+  - condition: template
+    value_template: "{{ current_master is not none and (missing | length) > 0 }}"
+
+actions:
+  - action: media_player.join
+    data:
+      group_members: "{{ missing }}"
+    target:
+      entity_id: "{{ current_master }}"
+  - action: media_player.volume_set
+    data:
+      volume_level: "{{ state_attr(current_master, 'volume_level') }}"
+    target:
+      entity_id: "{{ missing }}"
+  - action: logbook.log
+    data:
+      name: Sonos Watchdog
+      message: "Sweep: rejoined {{ missing | join(', ') }} to {{ current_master }} (silent drop, speaker stayed online)"
+
+mode: single
