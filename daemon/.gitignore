@@ -1,0 +1,7 @@
+logs/
+daemon.stdout.log
+*.log
+__pycache__/
+*.pyc
+.venv/
+venv/

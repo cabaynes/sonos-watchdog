@@ -1,6 +1,32 @@
 # Sonos Watchdog
 
-A two-automation Home Assistant system that **automatically reconnects Sonos speakers** when they drop out of an actively playing group. Works with playback started by HA scripts, the Sonos app, Sonos Voice — anything that creates a Sonos native group.
+This repo has **two complementary parts** for fighting Sonos
+multi-room audio reliability problems:
+
+1. **HA Blueprints** ([`blueprints/`](blueprints/)) — three Home
+   Assistant automations that auto-reconnect speakers when they drop
+   from an actively playing group. For UPnP-visible speaker drops.
+2. **Diagnostic Daemon** ([`daemon/`](daemon/)) — a Python service
+   that talks directly to Sonos via local UPnP + SOAP for forensic
+   analysis when the blueprints aren't enough. This is the toolkit
+   that produced [`FINDINGS.md`](FINDINGS.md).
+
+## 📝 If your Sonos drops on Apple Music — read this first
+
+[**FINDINGS.md**](FINDINGS.md) — a documented diagnosis (May 2026) of
+why Apple Music chronically drops on multi-speaker Sonos groups while
+the same hardware works perfectly with Spotify, Sonos Radio, and
+AirPlay 2. Includes the test methodology, root cause, and practical
+workarounds. Reproducible on your own setup using the daemon.
+
+If you don't want to do the diagnosis yourself, the TL;DR
+workarounds are:
+
+1. **Use Spotify** via the Sonos app for whole-house listening
+2. **Use Sonos Radio / TuneIn** for whole-house listening
+3. **Use AirPlay 2 from your iPhone** for whole-house Apple Music
+4. For native Sonos Apple Music: cap groups at 3 speakers max
+5. Lower Apple Music quality from Lossless to High/Standard
 
 ## The problem this solves
 

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS launchd plist template for running the Sonos Watchdog daemon
+  at user login.
+
+  Before using:
+    1. Edit the paths below to match where you cloned this repo
+    2. Rename file to com.YOURNAME.sonos-watchdog.plist (and update Label below)
+    3. Copy to ~/Library/LaunchAgents/
+    4. Load: launchctl load ~/Library/LaunchAgents/com.YOURNAME.sonos-watchdog.plist
+    5. Stop: launchctl unload ~/Library/LaunchAgents/com.YOURNAME.sonos-watchdog.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.YOURNAME.sonos-watchdog</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/PATH/TO/sonos-watchdog/daemon/sonos_watchdog.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/PATH/TO/sonos-watchdog/daemon</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/PATH/TO/sonos-watchdog/daemon/logs/launchd.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/PATH/TO/sonos-watchdog/daemon/logs/launchd.stderr.log</string>
+</dict>
+</plist>
