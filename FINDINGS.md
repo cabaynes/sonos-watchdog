@@ -49,8 +49,8 @@ catch it.
 
 1. Use **Spotify at 320 kbps ("Very High", non-lossless)** via the Sonos app — confirmed reliable on full-house groups
 2. Use **Sonos Radio / TuneIn** — confirmed reliable
-3. Use **AirPlay 2 from your iPhone/Mac** for whole-house Apple Music — gets you CD-quality 16/44.1 ALAC lossless via independent per-speaker streams (no master-relay)
-4. For **native Sonos lossless** (any service — Apple Music, Spotify Lossless, Tidal, Qobuz, Amazon HD): cap groups at **~3 speakers max**
+3. **Lossless via AirPlay 2 from any streaming app's iOS Control Center** — open Spotify, Apple Music, Tidal, etc., then use iOS's AirPlay picker (NOT the in-app Connect/Cast picker) to send to all Sonos speakers. Each speaker receives 16-bit/44.1 ALAC lossless via independent streams from your iPhone, bypassing Sonos's master-relay entirely. Works for ANY streaming service.
+4. For **native Sonos lossless via in-app Connect picker** (any service — Apple Music, Spotify Lossless, Tidal, Qobuz, Amazon HD): cap groups at **~3 speakers max**
 5. For native Sonos Apple Music at any quality: cap groups at **3 speakers max** (relay-side encryption + decryption tax pushes it lower than other services even at non-lossless tiers)
 
 **Quality tier caveat:** Sonos pulls streaming quality based on
@@ -212,6 +212,46 @@ This is also why **Apple Music via AirPlay 2 to Sonos works fine while
 Apple Music via native Sonos drops** — they're two completely
 different audio paths. The AirPlay path doesn't go through Sonos's
 master-relay framework at all.
+
+### The general workaround: any streaming service via AirPlay 2
+
+Because AirPlay 2 is service-agnostic, you can use this pattern for
+**any** streaming service whose multi-room playback hits the master-
+relay bottleneck — not just Apple Music. Spotify, Tidal, Qobuz,
+Amazon Music, YouTube Music — they all work the same way once you
+route through AirPlay 2.
+
+The trick is that the streaming app's in-app device picker (Spotify
+Connect for Spotify, "Devices" for Apple Music's native Sonos
+integration, etc.) routes audio through Sonos's native relay path —
+the broken one. To bypass it, you use iOS's **AirPlay picker**
+instead, which routes audio independently to each speaker:
+
+1. Start playback in your streaming app of choice (Spotify, Apple
+   Music, Tidal, etc.)
+2. Open iOS Control Center (swipe down from top-right corner)
+3. Long-press the music tile (the one showing what's playing)
+4. Tap the **AirPlay icon** (top-right of the music tile)
+5. Tap **multiple Sonos speakers** to check them as destinations
+6. Tap done
+
+The audio is now AirPlaying to all selected speakers as 16-bit/44.1
+ALAC, independent of the streaming service's native Sonos integration.
+
+**Quality note:** AirPlay 2's protocol caps at 16-bit/44.1 kHz ALAC.
+So if your source is 24-bit/192 kHz hi-res, the iPhone downsamples it
+to CD-quality lossless for the AirPlay leg. You lose hi-res but keep
+lossless compression. For most Sonos hardware (which is good but not
+reference-grade), this difference is academic.
+
+**Trade-offs vs in-app Connect picker:**
+
+| | In-app Connect (Sonos relay) | iOS AirPlay 2 picker |
+|---|---|---|
+| Quality at speaker | Up to 24/44.1 (when working) | 16/44.1 ALAC lossless |
+| Whole-house reliability | Breaks at lossless on 6+ speakers | Reliable (independent streams) |
+| iPhone tether | None — Sonos pulls direct from CDN | Required — iPhone is the source |
+| HA scriptability | Yes (via Sonos integration) | No (Apple-side only) |
 
 ## Failure mode is invisible to UPnP
 

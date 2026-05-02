@@ -174,19 +174,27 @@ which means it's audio-stream buffer starvation, not group churn.
 
 ## Step 7 — Apply the workarounds
 
-If you've confirmed the Apple Music master-relay pattern, your options
-are:
+If you've confirmed the master-relay bottleneck pattern (any service +
+multi-speaker), your options are:
 
-1. **Use Spotify or Sonos Radio for whole-house listening.** They use
-   different protocol paths and don't have the bottleneck.
-2. **Use AirPlay 2 from your iPhone or Mac for whole-house Apple
-   Music.** Each speaker gets its own independent stream from your
-   controller — no master-relay involved.
-3. **For native Sonos Apple Music, cap your groups at 3 speakers.**
-   Smaller groups stay under the master's relay capacity.
-4. **Lower Apple Music quality** (Apple Music app → Settings →
-   Audio → set to High or Standard, not Lossless). Reduces relay
-   load. Useful if you want occasional bigger Apple Music groups.
+1. **Use a low-bandwidth source for whole-house listening.** Spotify
+   320 kbps Ogg Vorbis or Sonos Radio — both confirmed reliable on
+   7-speaker groups.
+2. **Use AirPlay 2 from your iPhone via iOS Control Center** for
+   whole-house lossless. Works with any streaming service (Apple
+   Music, Spotify, Tidal, Qobuz, Amazon Music). Open iOS Control
+   Center → long-press music tile → tap AirPlay icon → check
+   multiple Sonos speakers. Bypasses the in-app Connect picker
+   (which routes through the bottleneck) and sends 16/44.1 ALAC
+   lossless independently to each speaker.
+3. **For native in-app lossless** (any service): cap groups at
+   ≤3 speakers.
+4. **For native Sonos Apple Music**: cap at 3 speakers regardless of
+   quality tier (Apple Music's relay overhead is heavier than other
+   services even at non-lossless tiers).
+5. **Lower the streaming service's quality** if you want bigger
+   native Sonos groups (Apple Music app → Audio → not Lossless;
+   Spotify → Media Quality → Very High not Lossless).
 
 See the full discussion in [`../FINDINGS.md`](../FINDINGS.md).
 
