@@ -190,6 +190,86 @@ are:
 
 See the full discussion in [`../FINDINGS.md`](../FINDINGS.md).
 
+## Bonus: verifying which quality tier your Sonos actually pulls
+
+A common myth: "I set my phone's streaming quality to Lossless, so my
+Sonos must be playing lossless." This is **almost always false**.
+
+Sonos doesn't ask your controller phone what quality to use. It
+authenticates as its own client to the streaming service and pulls
+whatever quality tier the **service's Sonos integration is configured
+to deliver** — which depends on (1) your account's entitlement, and
+(2) whether Sonos's firmware has shipped support for that tier yet.
+
+Sonos historically lags 6-12 months behind streaming services on
+adding new lossless tiers (e.g., Apple Music Lossless took ~year+
+after launch; Amazon Music HD took similar). So even when a service
+adds lossless, you may still be getting the previous tier on Sonos.
+
+The daemon lets you verify what Sonos is actually receiving in 30
+seconds, without taking the service's word for it.
+
+### Procedure
+
+1. **Note your current playback URI** while music is playing:
+
+```bash
+python3 tail_events.py 5 | grep -E "(spotify|sonos-http|rincon|x-spot|x-file)"
+```
+
+You're looking for a line like:
+
+```
+HH:MM:SS  Living Room    avTransport seq=N  PLAYING  current_track_uri=x-sonos-spotify:spotify:track:...?sid=12&flags=8232&sn=6
+```
+
+The `flags=N` value is the encoding tier identifier (per-service).
+
+2. **Toggle the quality setting** in the streaming service's controller
+   app (e.g., Spotify → Settings → Audio Quality → Lossless).
+
+3. **Force a fresh stream** by skipping the track on Sonos (or stopping
+   and restarting playback).
+
+4. **Re-check the URI**:
+
+```bash
+python3 tail_events.py 5 | grep -E "(spotify|sonos-http|rincon|x-spot|x-file)"
+```
+
+If `flags=` **changed**, the new tier reached Sonos. If `flags=` is
+**identical**, Sonos is still pulling the previous tier and your phone's
+toggle had no effect on what the speakers received.
+
+### Known flag values
+
+| URL pattern | flags= | Tier |
+|---|---|---|
+| `x-sonos-spotify:` | 8232 | Spotify Premium 320 kbps Ogg Vorbis (as of 2026-05-01) |
+
+Other services not yet characterized — please contribute findings via
+PRs or issues.
+
+### Implication for the Apple Music workaround
+
+The TL;DR workaround in [`../FINDINGS.md`](../FINDINGS.md) recommends
+Spotify via Sonos for full-house multi-room. Be aware that Spotify on
+Sonos is currently capped at 320 kbps Ogg Vorbis even if your Spotify
+account has the lossless tier — Sonos firmware doesn't yet pull
+Spotify lossless. You're getting the highest quality Spotify offered
+prior to lossless, which is excellent quality but not lossless.
+
+For genuine lossless multi-room you currently have to use either:
+
+- **AirPlay 2 from iPhone with Apple Music Lossless** — Apple
+  downsamples 24/192 hi-res to 16/44.1 ALAC for AirPlay 2, but you
+  get true CD-quality lossless to each speaker independently.
+- **Tidal / Qobuz / Amazon Music HD** as a Sonos music service —
+  these may or may not hit the same Apple-Music-relay bottleneck.
+  Use the procedure above to check the URL scheme and flags, and
+  the methodology in Step 4 to test for dropouts on multi-speaker
+  groups.
+
 ## Other patterns this toolkit can diagnose
 
 Even if you don't reproduce the Apple Music finding, the daemon is

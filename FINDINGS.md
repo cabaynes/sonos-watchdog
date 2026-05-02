@@ -36,11 +36,20 @@ catch it.
 
 **Workarounds (in priority order):**
 
-1. Use **Spotify** via the Sonos app — confirmed reliable on full-house groups
+1. Use **Spotify** via the Sonos app — confirmed reliable on full-house groups (capped at 320 kbps Ogg Vorbis on Sonos as of 2026-05-01, see "Quality tier caveat" below)
 2. Use **Sonos Radio / TuneIn** — confirmed reliable
-3. Use **AirPlay 2 from your iPhone/Mac** for whole-house Apple Music
+3. Use **AirPlay 2 from your iPhone/Mac** for whole-house Apple Music — gets you CD-quality 16/44.1 ALAC lossless via independent per-speaker streams
 4. For native Sonos Apple Music: cap groups at **3 speakers max**
 5. Lower Apple Music quality from Lossless to High/Standard
+
+**Quality tier caveat:** Sonos pulls streaming quality based on what
+its firmware supports for each service, not based on your phone's
+quality settings. As of 2026-05-01, Sonos doesn't pull Spotify
+lossless even if your account has it — `flags=8232` in the URL
+confirms 320 kbps Ogg Vorbis. See
+[`daemon/DIAGNOSTIC_GUIDE.md`](daemon/DIAGNOSTIC_GUIDE.md#bonus-verifying-which-quality-tier-your-sonos-actually-pulls)
+for the verification procedure if you want to check what your Sonos
+is actually receiving from any streaming service.
 
 ## How we diagnosed it
 
