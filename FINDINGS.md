@@ -17,15 +17,23 @@ system.
 
 ## TL;DR
 
-Apple Music on Sonos uses a **master-relay protocol** that doesn't
-scale to multi-speaker groups:
+Sonos's native multi-room playback uses a **master-relay protocol**
+that doesn't scale when you combine multi-speaker groups with
+high-bitrate streams:
 
-1. The master speaker pulls AAC audio + FairPlay DRM from Apple's CDN
-2. Decrypts the DRM locally
-3. Re-encodes and pushes the audio to each grouped satellite over a
-   separate unicast stream
-4. Under multi-speaker load (typically 4+ speakers), the master can't
-   keep all the satellite streams continuously fed → satellites starve
+1. The master speaker pulls audio from the CDN (sometimes with DRM)
+2. Decrypts and re-encodes
+3. Pushes the audio to each grouped satellite over a separate unicast
+   stream
+4. Under high-bandwidth load (Apple Music at any quality on 4+ speakers,
+   any service's lossless tier on ~6+ speakers), the master can't keep
+   all the satellite streams continuously fed → satellites starve
+
+Apple Music hits this earlier than other services because of FairPlay
+DRM decryption tax + lossless-by-default; Spotify Lossless hits it
+because of bitrate alone (~1-1.2 Mbps FLAC × 6 satellites). Spotify at
+non-lossless 320 kbps stays under the threshold and works fine on
+7-speaker groups.
 
 **The dropouts you hear are buffer-starvation in the satellites, not
 network failures.** Group membership stays intact, transport state
@@ -34,22 +42,27 @@ invisible to UPnP eventing — which is why Sonos's own diagnostics, HA
 integrations, and third-party "speaker drop" recovery tools never
 catch it.
 
+**The principle is more general than just Apple Music:**
+**high bitrate × multi-speaker group × master-relay fanout = master can't keep up.** Confirmed via follow-up testing 2026-05-01 with Spotify Lossless (24-bit/44.1 FLAC, ~1-1.2 Mbps) on the same 7-speaker group — same dropout pattern as Apple Music. Reverting to Spotify 320 kbps Ogg Vorbis (~320 kbps) instantly fixed it. So the protocol path matters but bitrate matters more — even Spotify's optimized dedicated `x-sonos-spotify:` code path saturates the master at ~1 Mbps × 6 unicast streams.
+
 **Workarounds (in priority order):**
 
-1. Use **Spotify** via the Sonos app — confirmed reliable on full-house groups (capped at 320 kbps Ogg Vorbis on Sonos as of 2026-05-01, see "Quality tier caveat" below)
+1. Use **Spotify at 320 kbps ("Very High", non-lossless)** via the Sonos app — confirmed reliable on full-house groups
 2. Use **Sonos Radio / TuneIn** — confirmed reliable
-3. Use **AirPlay 2 from your iPhone/Mac** for whole-house Apple Music — gets you CD-quality 16/44.1 ALAC lossless via independent per-speaker streams
-4. For native Sonos Apple Music: cap groups at **3 speakers max**
-5. Lower Apple Music quality from Lossless to High/Standard
+3. Use **AirPlay 2 from your iPhone/Mac** for whole-house Apple Music — gets you CD-quality 16/44.1 ALAC lossless via independent per-speaker streams (no master-relay)
+4. For **native Sonos lossless** (any service — Apple Music, Spotify Lossless, Tidal, Qobuz, Amazon HD): cap groups at **~3 speakers max**
+5. For native Sonos Apple Music at any quality: cap groups at **3 speakers max** (relay-side encryption + decryption tax pushes it lower than other services even at non-lossless tiers)
 
-**Quality tier caveat:** Sonos pulls streaming quality based on what
-its firmware supports for each service, not based on your phone's
-quality settings. As of 2026-05-01, Sonos doesn't pull Spotify
-lossless even if your account has it — `flags=8232` in the URL
-confirms 320 kbps Ogg Vorbis. See
+**Quality tier caveat:** Sonos pulls streaming quality based on
+both your phone's controller setting AND a per-Sonos system-wide
+"Change Quality Settings" toggle inside the Spotify Connect picker.
+As of 2026-05-01, Sonos DOES pull Spotify Lossless when properly
+enabled, but it produces the same multi-speaker dropout pattern as
+Apple Music due to the bandwidth bottleneck. Use the **"Lossless"
+badge in the Sonos app's Now Playing view** as ground truth for
+whether you're actually getting lossless. See
 [`daemon/DIAGNOSTIC_GUIDE.md`](daemon/DIAGNOSTIC_GUIDE.md#bonus-verifying-which-quality-tier-your-sonos-actually-pulls)
-for the verification procedure if you want to check what your Sonos
-is actually receiving from any streaming service.
+for the verification procedure.
 
 ## How we diagnosed it
 
@@ -134,27 +147,35 @@ This is exactly the symptom Sonos+Apple-Music users describe: the room
 where the master speaker lives sounds fine, every other room is
 chopped into 1-second-on, 5-second-off fragments.
 
-## Why Spotify avoids this
+## Why Spotify (at 320 kbps) avoids this — but Spotify Lossless doesn't
 
 Spotify on Sonos runs on a **dedicated protocol scheme**
 (`x-sonos-spotify:`) rather than the generic universal-music-service
-relay framework. Several factors lighten the load:
+relay framework. At its 320 kbps Ogg Vorbis tier, this lighter pipeline
+sustains 7-speaker groups cleanly. Factors helping:
 
 - **No DRM decryption step.** Spotify uses standard Ogg Vorbis without
   the FairPlay decryption pipeline.
-- **Lighter bitrate.** Spotify's standard streaming is 96-320 kbps
-  Ogg Vorbis; lossless AAC is heavier.
+- **Lighter bitrate at 320 kbps.** Compared to Apple Music at any
+  tier (which is heavier even at "Standard").
 - **Different code path inside Sonos firmware.** Spotify has a deep
   partnership with Sonos and got its own protocol handler integrated
   at the firmware level — the `x-sonos-spotify:` URL scheme is the
   proof.
-- **Possibly per-speaker session capability.** Spotify Connect's model
-  allows individual speakers to authenticate and pull streams
-  independently in some configurations, though Sonos's group-playback
-  mode still uses some form of master coordination.
 
-The result: Spotify's relay pipeline is lighter, and the master can
-sustain 6+ unicast streams without buffer starvation.
+**However, Spotify Lossless on Sonos hits the same wall.** Confirmed
+2026-05-01 testing: enabling Spotify Lossless (24-bit/44.1 FLAC,
+~1-1.2 Mbps compressed — about 4× the bandwidth of 320 kbps Ogg
+Vorbis) on the same 7-speaker group produced the chronic Office
+dropout pattern within seconds. Reverting to 320 kbps cleared the
+dropouts immediately. So even Spotify's optimized dedicated code path
+saturates when fanning out ~1 Mbps × 6 unicast streams from a single
+master.
+
+**The principle is bandwidth, not service.** A "good" service
+architecture (Spotify's dedicated path) buys you more headroom than a
+"bad" one (Apple Music's generic relay), but every service hits a
+ceiling when bitrate × group size exceeds master-relay capacity.
 
 ## Why Sonos Radio avoids this
 
