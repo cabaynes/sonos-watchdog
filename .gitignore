@@ -18,3 +18,6 @@ venv/
 
 # Logs
 *.log
+
+# Session checkpoints stay local — this repo is PUBLIC; committed checkpoints would publish session notes
+.checkpoints/
