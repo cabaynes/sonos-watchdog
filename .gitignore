@@ -19,5 +19,5 @@ venv/
 # Logs
 *.log
 
-# Session checkpoints stay local — this repo is PUBLIC; committed checkpoints would publish session notes
-.checkpoints/
+# Session putdowns stay local — this repo is PUBLIC; committed putdowns would publish session notes
+.putdowns/
