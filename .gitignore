@@ -21,3 +21,6 @@ venv/
 
 # Session putdowns stay local — this repo is PUBLIC; committed putdowns would publish session notes
 .putdowns/
+
+# Grill Me session logs stay local — this repo is PUBLIC; committed sessions would publish planning notes
+grill-me-sessions/
