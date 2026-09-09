@@ -24,3 +24,9 @@ venv/
 
 # Grill Me session logs stay local — this repo is PUBLIC; committed sessions would publish planning notes
 grill-me-sessions/
+
+# --- workspace baseline (managed by scripts/fanout-gitignore.sh) ---
+.claude/worktrees/
+.playwright-cli/
+.playwright-mcp/
+# --- end workspace baseline ---
