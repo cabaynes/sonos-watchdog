@@ -29,4 +29,5 @@ grill-me-sessions/
 .claude/worktrees/
 .playwright-cli/
 .playwright-mcp/
+.taste-skill/
 # --- end workspace baseline ---
