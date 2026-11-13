@@ -1,0 +1,6 @@
+pytest==9.2.0
+Jinja2==3.1.6
+PyYAML==6.0.3
+yamllint==1.38.0
+soco==0.32.2
+requests==2.34.2
