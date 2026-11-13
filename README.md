@@ -1,251 +1,136 @@
 # Sonos Watchdog
 
-This repo has **two complementary parts** for fighting Sonos
-multi-room audio reliability problems:
+A Home Assistant blueprint that keeps an eye on your Sonos groups, plus a few
+diagnostic tools and a write-up of why Sonos multi-room playback drops out.
 
-1. **HA Blueprints** ([`blueprints/`](blueprints/)) — three Home
-   Assistant automations that auto-reconnect speakers when they drop
-   from an actively playing group. For UPnP-visible speaker drops.
-2. **Diagnostic Daemon** ([`daemon/`](daemon/)) — a Python service
-   that talks directly to Sonos via local UPnP + SOAP for forensic
-   analysis when the blueprints aren't enough. This is the toolkit
-   that produced [`FINDINGS.md`](FINDINGS.md).
+## What it does — and what it can't
 
-## 📝 If your Sonos drops on Apple Music — read this first
+**It fixes one thing:** a speaker that **drops off the network** while your group is
+playing (a Wi-Fi blip, a reboot, a power cut) is put back into the group when it comes
+back, usually within a few seconds.
 
-[**FINDINGS.md**](FINDINGS.md) — a documented diagnosis (May 2026) of
-why Apple Music chronically drops on multi-speaker Sonos groups while
-the same hardware works perfectly with Spotify, Sonos Radio, and
-AirPlay 2. Includes the test methodology, root cause, and practical
-workarounds. Reproducible on your own setup using the daemon.
+**It logs what Home Assistant can see:** every listening session (who led it, which
+speakers, the source), every speaker that leaves a playing group or goes offline, and
+every repair, with optional long-term monthly totals.
 
-If you don't want to do the diagnosis yourself, the TL;DR
-workarounds are:
+**It cannot see the most common Sonos dropout:** a speaker that **stays in the group but
+goes silent** for a few seconds at a time. When that happens the speakers keep reporting
+"playing" and the group never changes, so neither this blueprint nor anything else in
+Home Assistant can detect it, and an empty log does **not** mean there were no dropouts.
+That kind is caused by the group's leader not keeping up with streaming to the others;
+[FINDINGS.md](FINDINGS.md) explains it and what actually helps (lower-bitrate sources,
+smaller groups, a wired speaker leading).
 
-1. **Use Spotify** via the Sonos app for whole-house listening
-2. **Use Sonos Radio / TuneIn** for whole-house listening
-3. **Use AirPlay 2 from your iPhone** for whole-house Apple Music
-4. For native Sonos Apple Music: cap groups at 3 speakers max
-5. Lower Apple Music quality from Lossless to High/Standard
+**What it deliberately won't do:**
 
-## The problem this solves
+- **Undo your own changes.** A speaker that leaves the group while still online — you
+  ungrouped it, switched to a smaller group or preset, or took it to play something else —
+  is left alone. Home Assistant can't tell that apart from a speaker quietly falling out,
+  so the watchdog assumes it was you. It still logs it.
+- **Touch volume.** Rejoined speakers keep their own volume.
+- **Pull in a busy speaker.** A speaker playing something of its own, or grouped with
+  others, is never taken.
+- **Change the group's leader while music plays.** We tried it: the group went out of
+  sync until it was rebuilt (see FINDINGS.md).
 
-Sonos's grouped multi-room playback is famously flaky in some environments — speakers drop mid-song, fall out of the group silently, or go briefly unreachable on Wi-Fi. Even with a wired Ethernet anchor (which usually helps), some apartments and dense Wi-Fi environments still see chronic dropouts. Manual re-grouping via the Sonos app is annoying and breaks the listening flow.
+## Install
 
-This watchdog runs entirely in HA and:
+1. **Create the session helper.** Settings → Devices & services → Helpers → Create helper →
+   **Text**. Name it `Sonos intended speakers` (entity `input_text.sonos_intended_speakers`)
+   and set **Maximum length to 255**.
+2. **Import the blueprint.** Settings → Automations & scenes → Blueprints → Import blueprint,
+   and paste:
+   `https://github.com/cabaynes/sonos-watchdog/blob/main/blueprints/sonos_watchdog.yaml`
+3. **Create one automation from it.** Pick every Sonos speaker, pick the helper, keep the
+   defaults, save.
 
-1. **Detects** when a candidate speaker either (a) recovers from `unavailable` or (b) is silently missing from the active group
-2. **Auto-rejoins** it to the current playing master
-3. **Matches volume** to the master's current level
+That's the whole install. The settings:
 
-It's source-agnostic — it doesn't matter whether you started the music from an HA script, the Sonos app, or Sonos Voice. As long as a Sonos speaker is playing as a group master, the watchdog watches the rest.
+| Setting | Default | What it means |
+|---|---|---|
+| Settle time | 60 s | How long a smaller group must stay smaller before the watchdog decides why a speaker left (offline → it will be brought back; still online → your change). |
+| Wait after a speaker comes back | 3 s | Sonos speakers answer the network slightly before they accept commands. |
+| Forget the session after | 15 min | With nothing playing for this long, the session is over. Pausing for a few minutes keeps it. |
+| Wired speakers | none | Speakers on Ethernet. Each session's log line then says whether one of them led. |
+| Log file, counters | none | Optional — see below. |
 
-## Architecture
+### Optional: a log file that outlives the logbook
 
-**Three** complementary automations, each handling a different failure mode:
+Home Assistant's logbook keeps about 10 days. To keep every event:
 
-### 1. Speaker Recovery (event-driven)
+1. Add the File integration (Settings → Devices & services → Add integration → **File**),
+   choose **Notification**, and give it a path such as `/config/sonos_watchdog/log.csv`.
+2. Allow that folder in `configuration.yaml`, then restart Home Assistant:
 
-| | |
+   ```yaml
+   homeassistant:
+     allowlist_external_dirs:
+       - /config/sonos_watchdog
+   ```
+
+3. Pick the new `notify.…` entity as the blueprint's **Log file**.
+
+Each event is one line: `time,event,subject,detail`, for example
+`2026-11-12T19:04:11-08:00,speaker_left,media_player.office,offline; leader=media_player.living_room`.
+
+| Event | Meaning |
 |---|---|
-| **Trigger** | Any monitored Sonos speaker transitions `unavailable → idle/playing/paused` |
-| **Latency** | 4–8 seconds end-to-end (HA event delivery + 3s tuning delay + Sonos join + Sonos sync) |
-| **Catches** | Wi-Fi dropouts, brief network blips, speaker reboots |
-| **Misses** | Silent drops where the speaker stays online but leaves the group |
+| `session_start` / `session_end` | A group started playing / nothing has played for the forget time (with duration). |
+| `session_change` | The session's group changed: grew, a speaker went offline, or one left on purpose. |
+| `speaker_left` | A session speaker left the playing group — `offline` or `online`. |
+| `speaker_offline` / `speaker_online` | Any watched speaker went unavailable / came back (with how long). |
+| `speaker_back` | A speaker that went offline is back in the group — `by=sonos` (Sonos did it) or `by=watchdog`. |
+| `repair` | The watchdog sent a join. |
 
-### 2. Periodic Group Sweep (timer-driven)
+### Optional: monthly totals kept forever
 
-| | |
-|---|---|
-| **Trigger** | Every N seconds (default 15) |
-| **Latency** | Up to your sweep interval (worst case) |
-| **Catches** | Silent drops, residual fragmentation after a multi-speaker recovery race |
-| **Misses** | Master itself dying (no group to repair) |
+Create four **Counter** helpers (sessions, speakers left, speakers offline, repairs) and pick
+them in the blueprint. Counters alone are purged with the rest of the history after about
+10 days. To keep long-term statistics, add a **Template sensor** helper for each one, with
+the counter's state as the value and **State class: Total increasing**. Then a
+**Statistics graph** card with period *Month* shows the totals month by month.
 
-### 3. Master Failover (event-driven)
+### Optional: a wired speaker always leads
 
-| | |
-|---|---|
-| **Trigger** | A monitored speaker that's currently the playing master goes `unavailable` |
-| **Latency** | ~5 seconds before re-run + however long the music script takes (~3s) = ~8 seconds total to playback resuming on the new master |
-| **Catches** | The case where the master itself dies — without this, the queue dies with it and the whole session ends |
-| **Misses** | Cases where no music script was tracking itself (i.e. someone started playback via the Sonos app or Sonos Voice — no record for the failover to re-run) |
+See [docs/wired-leader.md](docs/wired-leader.md).
 
-Together they cover every common Sonos dropout mode.
+## Upgrading from v1 or v2
 
-## How master failover works
+v1 had three blueprints (recovery, periodic sweep, master failover); v2 added a snapshot
+automation. Delete those automations and the `input_text.sonos_active_script` helper
+(master failover is gone: it needed every music script to register itself and couldn't
+help sessions started from the Sonos app), then follow the install above. An existing
+`input_text.sonos_intended_speakers` helper can be reused as is.
 
-When you start music via an HA script, that script writes its own name to the helper `input_text.sonos_active_script` (e.g. `"play_todays_country"`). The failover automation watches every "master-eligible" speaker for an `unavailable` transition. When one dies AND was the active master AND the helper has a script name, it waits 5 seconds and calls `script.turn_on` on that script.
+## Tools
 
-The targeted music script must have its own master-priority logic — it walks a priority list (e.g. living-room → kitchen → office → bathroom → bedroom) and picks the first speaker that's not unavailable. Since the previous master is now unavailable, the script naturally promotes the next-priority speaker.
-
-If you start playback from the Sonos app or Sonos Voice, the helper isn't populated, and failover is skipped — those sessions die with their master. There's no clean way around this without HA injecting itself into every Sonos session, which would defeat the source-agnostic principle.
-
-## Master detection
-
-The watchdog detects "the current master" dynamically using a Jinja template that looks for any Sonos speaker satisfying:
-
-```python
-state == 'playing'
-and group_members[0] == self    # speaker is the coordinator of its group
-and len(group_members) > 1      # group has more than just the master itself
-```
-
-If multiple groups are playing simultaneously (rare), the last one in iteration order wins. The "auto-join candidates" list controls which speakers get pulled into a playing group — exclude any speaker you don't want auto-grouped (e.g. a kid's bedroom).
-
-## Installation
-
-### Option A: Install via Blueprint UI (recommended)
-
-1. Go to **Settings → Automations & Scenes → Blueprints** in HA
-2. Click **Import Blueprint**
-3. Paste the URL to `blueprints/sonos_watchdog_recovery.yaml` (or import the file manually if you've cloned this repo)
-4. Repeat for `blueprints/sonos_watchdog_sweep.yaml` and `blueprints/sonos_watchdog_master_failover.yaml`
-5. Click **Create Automation** on each blueprint
-6. Configure:
-   - **Sonos speakers** — pick every Sonos `media_player.*` entity in your home (used for master detection in recovery and sweep)
-   - **Auto-join candidates** (sweep only) — usually the same list, minus any speaker you don't want auto-grouped
-   - **Master-eligible speakers** (failover only) — Sonos speakers that can be the master of a playing group, typically excluding portables (Roam, Move)
-   - **Recovery delay** (recovery only) — default 3s; bump to 5–8s if Wi-Fi is slow
-   - **Sweep interval** (sweep only) — 10–15s recommended
-   - **Failover delay** (failover only) — default 5s, lets the network settle after master death
-
-### Required helper for master failover
-
-The failover blueprint needs an `input_text` helper to know which music script to re-run. Create it via:
-
-**Settings → Devices & Services → Helpers → Create Helper → Text** — name it `sonos_active_script`, leave initial value blank.
-
-Or via YAML:
-```yaml
-input_text:
-  sonos_active_script:
-    name: Sonos Active Music Script
-    initial: ""
-    max: 100
-```
-
-Each of your music scripts must populate this helper at the start of its sequence. See the **Music script structure** section below.
-
-### Music script structure (failover prerequisite)
-
-For master failover to work, your music scripts need two properties:
-
-1. They write their own name to `input_text.sonos_active_script` at the start
-2. They contain master-priority logic — pick a master at runtime from a priority list, falling back to the next available speaker if the preferred one is unavailable
-
-Example skeleton:
-
-```yaml
-play_my_playlist:
-  alias: My Playlist
-  mode: single
-  variables:
-    favorite_id: "FV:2/3"  # your Sonos Favorite ID
-    target_volume: 0.20
-    master_priority:        # ordered, top to bottom
-      - media_player.living_room
-      - media_player.kitchen
-      - media_player.office
-      - media_player.bathroom
-      - media_player.bedroom
-    master: >-
-      {%- set ns = namespace(m=none) -%}
-      {%- for s in master_priority -%}
-        {%- if ns.m is none and not is_state(s, 'unavailable') -%}
-          {%- set ns.m = s -%}
-        {%- endif -%}
-      {%- endfor -%}
-      {{ ns.m }}
-    all_candidates:
-      - media_player.kitchen
-      - media_player.office
-      - media_player.living_room
-      # ... etc, all your Sonos speakers
-    members: >-
-      {{ all_candidates | reject('eq', master) | reject('is_state', 'unavailable') | list }}
-  sequence:
-    - action: input_text.set_value
-      target:
-        entity_id: input_text.sonos_active_script
-      data:
-        value: "play_my_playlist"   # ← MUST match this script's key
-    - action: media_player.join
-      data:
-        group_members: "{{ members }}"
-      target:
-        entity_id: "{{ master }}"
-    - action: media_player.volume_set
-      data:
-        volume_level: "{{ target_volume }}"
-      target:
-        entity_id: "{{ [master] + members }}"
-    - action: media_player.play_media
-      target:
-        entity_id: "{{ master }}"
-      data:
-        media_content_id: "{{ favorite_id }}"
-        media_content_type: favorite_item_id
-```
-
-Adapt the priority list, candidates, favorite ID, and volume to your setup.
-
-### Option B: Use the Claude Code prompt
-
-If you use [Claude Code](https://claude.ai/claude-code) to manage your HA instance, the `claude-code-prompt.md` in this folder is a copy-paste template that walks Claude through discovering your Sonos speakers, asking which ones should be candidates, and installing both blueprints in your config.
-
-## Telemetry — see how often the watchdog actually fires
-
-Each blueprint writes a `logbook.log` entry every time it repairs something. Open **Logbook** in HA and filter on `Sonos Watchdog` to see a chronological history of every recovery, sweep, and failover event with timestamps and details.
-
-For a numeric counter (so you can see "watchdog has fired 47 times this month" at a glance), add this to your `configuration.yaml`:
-
-```yaml
-counter:
-  sonos_watchdog_repairs:
-    name: Sonos Watchdog Repairs
-    icon: mdi:counter
-    initial: 0
-    step: 1
-```
-
-Then in each watchdog automation's actions, add an increment step:
-
-```yaml
-- action: counter.increment
-  target:
-    entity_id: counter.sonos_watchdog_repairs
-```
-
-Add a Sensor card on a dashboard pointing at `counter.sonos_watchdog_repairs` to see the running total. Restart HA after first adding the counter (counter helpers don't reload via API).
-
-## Soft assumptions worth knowing
-
-- **Speakers playing on their own are left alone.** The sweep only auto-joins candidates whose state is `idle`. If someone is using the bedroom Sonos for a podcast, the watchdog won't yank it into the kitchen group.
-- **Your candidate speakers should have similar volume preferences.** The watchdog matches the recovered speaker's volume to the master's current level. If your bedroom usually plays at 5% and the kitchen at 30%, auto-join will set bedroom to 30% — which might be jarring.
-- **The 3-second recovery delay is tuned for typical Sonos.** Some setups need 5–8 seconds before speakers will accept control commands post-reconnect. If you see "join failed" entries in your logs immediately after recoveries, bump the delay.
-- **Multiple simultaneous masters aren't supported.** If you have two separate Sonos groups playing at once (rare), only the most recently iterated one will get watchdog coverage. Sonos generally discourages this anyway.
+[`tools/`](tools/) has small Python scripts that talk to the speakers directly on your
+network: a one-shot health check (how each speaker is connected, radio errors, mesh
+signal, who leads each playing group), a group watcher, and the event recorder used for
+FINDINGS.md. See [tools/README.md](tools/README.md).
 
 ## Troubleshooting
 
-- **Recovery doesn't fire** → check that the speaker actually transitions through `unavailable` and not some other state. Some Sonos integrations report `unknown` or stay in `idle` during dropouts. Look at the entity's state history in HA.
-- **Sweep fires but doesn't join** → look at the trace; the `missing` list might be empty because all candidates are `unavailable` rather than `idle`. The sweep deliberately ignores `unavailable` speakers (they need recovery first).
-- **Speaker rejoins but at wrong volume** → the master's volume can drift mid-listen. The watchdog matches the master's volume **at the moment of rejoin**, not the volume at script start. This is intentional but worth knowing.
-- **Race conditions between recovery + sweep** → both can fire close to each other. `media_player.join` is idempotent so duplicate calls are harmless.
+- **Nothing in the log.** Check the automation is on and the helper's maximum length is 255.
+  Then start music on a group and look for `session_start` in the logbook (filter on
+  "Sonos Watchdog").
+- **A speaker came back but wasn't rejoined.** It has to have been in the session and to
+  have gone **offline** (unavailable in Home Assistant). If it left while still online,
+  that's treated as your change. The `speaker_left` line says which.
+- **Silent gaps in some rooms.** That's the in-group dropout this can't see. See
+  [FINDINGS.md](FINDINGS.md).
+- **Everything shows unavailable.** If you turned off UPnP in the Sonos app (Account →
+  Privacy & Security → Connection Security), Home Assistant's Sonos integration and these
+  tools can't reach the speakers.
 
-## What this won't fix
+## Development
 
-- **Sessions started outside HA (Sonos app, Sonos Voice, AirPlay).** The recovery edge and sweep automations work for these because they read live `group_members` state. But master failover only works for sessions started by an HA music script that writes its own name to `input_text.sonos_active_script`. If a Sonos-app session's master dies, the failover has nothing to re-run.
-- **AirPlay 2 multi-room dropouts.** AirPlay 2 multi-room is an Apple-side group, not a Sonos group. From HA's perspective, each Sonos speaker is just receiving an AirPlay stream — no `group_members` link to detect.
-- **Root-cause Sonos network problems.** This is a recovery system, not a prevention system. If your underlying Wi-Fi/SonosNet is unstable, fix that too — wired Ethernet to one speaker (enabling SonosNet mesh) is the single most impactful network-side fix.
-
-## Contributing
-
-Improvements welcome. Particularly useful additions:
-- Per-candidate "expected volume" override (so quiet rooms stay quiet at their preferred level)
-- AirPlay 2 multi-room equivalent (much harder — would need to track AirPlay session state)
-- Source-agnostic failover (sniff `media_content_id` from the dying master in real time, replay it on the new master without a music-script wrapper)
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pytest -q          # renders the blueprint's templates against test states
+.venv/bin/yamllint blueprints/
+```
 
 ## License
 
-Public domain. Take it, adapt it, share it.
+MIT — see [LICENSE](LICENSE).

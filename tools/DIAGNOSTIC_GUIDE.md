@@ -2,7 +2,7 @@
 
 If you have chronic Sonos audio dropouts and want to figure out the
 real cause instead of guessing, this guide walks you through using the
-daemon in this directory to do a methodical diagnosis. The same
+tools in this directory to do a methodical diagnosis. The same
 methodology produced [`../FINDINGS.md`](../FINDINGS.md) — the Apple
 Music master-relay diagnosis.
 
@@ -18,19 +18,19 @@ You will need:
 
 ```bash
 git clone https://github.com/cabaynes/sonos-watchdog.git
-cd sonos-watchdog/daemon
+cd sonos-watchdog/tools
 pip3 install --user -r requirements.txt
 ```
 
-The daemon needs to be reachable from your Sonos speakers via HTTP
+The recorder needs to be reachable from your Sonos speakers via HTTP
 (it spins up a small listener for UPnP NOTIFY callbacks). Most
 home networks Just Work; if your Mac/PC is on a guest VLAN or has a
 restrictive firewall, move it onto the main network for the test.
 
-## Step 1 — Run the daemon
+## Step 1 — Run the event recorder
 
 ```bash
-python3 sonos_watchdog.py
+python3 event_recorder.py
 ```
 
 You should see output like:
@@ -52,19 +52,24 @@ PHY-error counters are polled every 30 seconds.
 Open a second terminal and run:
 
 ```bash
-python3 mesh_report.py
+python3 sonos_health.py
 ```
 
 You'll get a table like:
 
 ```
-Speaker            Conn                   Ch (MHz)     PHY/30s  Top mesh neighbors
-----------------------------------------------------------------------------------
-Bathroom           SonosNet (wireless)    2412           37729  Bedroom 59/62, ...
-Living Room        SonosNet (Ethernet)    2412           93594  HT Surround #2 67/58, ...
-Office             SonosNet (wireless)    2412           47922  Living Room 52/63, ...
+Speaker          IP              Link        MHz  PHY err/s  Strongest neighbours
+------------------------------------------------------------------------------------------------
+Bathroom         192.168.1.20    SonosNet   2462        522  Bedroom 59/64 good, Kitchen 50/49 weak
+Living Room      192.168.1.21    WIRED      2462       2265  Kitchen 68/57 ok, ...
+Roam             192.168.1.22    WiFi       5785        433  -
 ...
+Playing groups:
+  Living Room leads ['Kitchen', 'Living Room', 'Office']  wired-led: yes
 ```
+
+Friendly neighbour names come from an optional `labels.local.json` (radio MAC → name);
+without it you see the last part of each MAC.
 
 This tells you:
 
@@ -74,8 +79,9 @@ This tells you:
   2462 = ch 11)
 - **Mesh signal quality** between speakers, in both directions
   (FROM/TO; higher is better; 60+ is good, <45 is poor)
-- **PHY error rates** per 30 seconds (higher = more radio
-  retransmissions / interference)
+- **PHY error rates** per second (higher = more radio corruption /
+  interference; compare speakers, there's no official threshold)
+- **Which speaker leads each playing group**, and whether it's wired
 
 ## Step 3 — Form a problem-sized group
 
@@ -119,7 +125,7 @@ Both are worth trying separately if you have the time.
 
 ## Step 5 — Read the URL schemes
 
-While each source is playing, check the daemon log:
+While each source is playing, check the recorder log:
 
 ```bash
 python3 tail_events.py 30
@@ -154,7 +160,7 @@ Equally important — confirm the dropouts have nothing to do with the
 network. While Apple Music is dropping, run:
 
 ```bash
-python3 mesh_report.py
+python3 sonos_health.py
 ```
 
 If your mesh signal scores haven't degraded compared to baseline (Step
@@ -180,13 +186,10 @@ multi-speaker), your options are:
 1. **Use a low-bandwidth source for whole-house listening.** Spotify
    320 kbps Ogg Vorbis or Sonos Radio — both confirmed reliable on
    7-speaker groups.
-2. **Use AirPlay 2 from your iPhone via iOS Control Center** for
-   whole-house lossless. Works with any streaming service (Apple
-   Music, Spotify, Tidal, Qobuz, Amazon Music). Open iOS Control
-   Center → long-press music tile → tap AirPlay icon → check
-   multiple Sonos speakers. Bypasses the in-app Connect picker
-   (which routes through the bottleneck) and sends 16/44.1 ALAC
-   lossless independently to each speaker.
+2. **Keep a wired speaker as the leader** of big groups (start the
+   group from the wired room). Avoid AirPlay to several speakers:
+   Sonos groups them and one relays to the rest, so it is *not* a
+   bypass (see FINDINGS.md, "What we learned since").
 3. **For native in-app lossless** (any service): cap groups at
    ≤3 speakers.
 4. **For native Sonos Apple Music**: cap at 3 speakers regardless of
@@ -214,7 +217,7 @@ adding new lossless tiers (e.g., Apple Music Lossless took ~year+
 after launch; Amazon Music HD took similar). So even when a service
 adds lossless, you may still be getting the previous tier on Sonos.
 
-The daemon lets you verify what Sonos is actually receiving in 30
+The recorder lets you verify what Sonos is actually receiving in 30
 seconds, without taking the service's word for it.
 
 ### Procedure
@@ -223,7 +226,7 @@ The reliable indicator is **the streaming app's UI badge in the Sonos
 or controller app** — not the URL `flags=` field. We initially
 assumed the URI's `flags=` parameter encoded quality, but follow-up
 testing showed it doesn't reliably change with quality. Use UI badges
-+ audible behavior + (if needed) bandwidth correlation in the daemon.
++ audible behavior + (if needed) bandwidth correlation in the recorder.
 
 1. **Verify the UI badge.** While playing on Sonos:
    - **Sonos app**: tap the Now Playing bar. A "Lossless" badge
@@ -247,7 +250,7 @@ testing showed it doesn't reliably change with quality. Use UI badges
    - Verify the badge disappears
    - Note new behavior: dropouts gone?
 
-3. **Optional: correlate with the daemon log** to confirm timing of
+3. **Optional: correlate with the recorder log** to confirm timing of
    stream changes via `python3 tail_events.py 30`. Look for fresh
    `avTransport seq` events with new track URIs. The URI's `sid=`
    field identifies the service. The `flags=` field has *some*
@@ -283,21 +286,19 @@ Spotify via Sonos for full-house multi-room. Important nuance based on
 For genuine lossless multi-room on full-house groups (6+ speakers),
 your reliable options are:
 
-- **AirPlay 2 from iPhone with Apple Music Lossless** — Apple
-  downsamples 24/192 hi-res to 16/44.1 ALAC for AirPlay 2, but you
-  get true CD-quality lossless to each speaker independently. No
-  master-relay = no bandwidth bottleneck.
+- ~~AirPlay 2 from iPhone~~ — withdrawn: AirPlay to several Sonos
+  speakers forms a relaying Sonos group (FINDINGS.md).
 - **Tidal / Qobuz / Amazon Music HD** as a Sonos music service —
   given the bandwidth principle, expect any service's lossless tier
   to hit the same wall on 6+ speakers regardless of the underlying
-  protocol path. Test with the daemon to confirm.
+  protocol path. Test with the recorder to confirm.
 
 For lossless on small groups (≤3 speakers), any of these services'
 lossless tiers should work fine.
 
 ## Other patterns this toolkit can diagnose
 
-Even if you don't reproduce the Apple Music finding, the daemon is
+Even if you don't reproduce the Apple Music finding, the tools are
 useful for:
 
 ### "Speakers drop out randomly during music"
@@ -344,18 +345,15 @@ The body of evidence helps everyone.
 
 ## Limitations
 
-- The daemon only sees what the speakers themselves report. It can't
+- The tools only see what the speakers themselves report. It can't
   detect issues upstream of the master (e.g., a flaky internet
   connection between Apple's CDN and the master speaker).
 - Mesh-signal scores are Sonos's proprietary metric, not standard RSSI
-  in dBm. The 0-100 scale is informal; consider it relative within
-  your own setup, not absolute.
-- The daemon doesn't currently poll `RelativeTimePosition`. If you
-  want to detect buffer-starvation stalls programmatically, add a
-  poller for `avTransport.GetPositionInfo` on each satellite — if
-  state=`PLAYING` but `RelTime` isn't advancing in real time, it's
-  stalled.
-- The `auto_renew=True` UPnP subscription parameter has occasional
-  hiccups in `soco` ≤0.31. Long runs may need a daemon restart every
-  few days. Production use should add a healthcheck that detects
-  silent subscription failures.
+  in dBm (roughly 0–62 in practice). Treat it as relative within your
+  own setup, not absolute.
+- Silent in-group dropouts can't be detected: the group keeps
+  reporting `PLAYING` with an advancing position, and 2026 firmware's
+  diagnostic pages have no audio-buffer counters. `watch_group.py`
+  flags what *is* visible (stalls, leaves, reconnects, slow answers).
+- UPnP subscriptions can lapse silently over long runs. The recorder
+  is meant for a session of testing, not to run for weeks.

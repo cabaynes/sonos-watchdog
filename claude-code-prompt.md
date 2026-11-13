@@ -1,91 +1,43 @@
 # Claude Code prompt — install Sonos Watchdog
 
-Paste the prompt below into a Claude Code session running in your Home Assistant project folder. It walks Claude through:
-
-1. Discovering your Sonos speakers via the HA REST API
-2. Asking you which speakers to monitor
-3. Downloading and installing both Sonos Watchdog blueprints to your HA `config/blueprints/automation/` folder
-4. Creating the two automations from the blueprints
-5. Verifying everything loaded correctly
+Paste the prompt below into a Claude Code session running in your Home Assistant project
+folder. It has Claude check API access, find your Sonos speakers, create the helper, install
+the blueprint and create the automation — asking you before anything it can't undo.
 
 ## Prerequisites
 
-- A working Claude Code setup pointed at your HA project folder
-- HA REST API access configured (a long-lived access token, available at HA → Profile → Long-lived Access Tokens). Most HA-with-Claude-Code projects already have a `.env` with `HA_URL` and `HA_TOKEN`.
-- File access to your HA `/config/` directory — usually via Samba (`/Volumes/config/` on macOS), the File Editor add-on, or SSH
+- Home Assistant REST API access: a long-lived access token (HA → your profile → Security →
+  Long-lived access tokens), usually kept in a `.env` file as `HA_URL` and `HA_TOKEN`.
+- The Sonos integration already set up in Home Assistant.
 
 ## The prompt
 
-Copy everything between the `---` markers and paste it as your first message in a new Claude Code session.
+Copy everything between the `---` markers.
 
 ---
 
-I want to install the **Sonos Watchdog** system in my Home Assistant setup. It's a three-automation system that auto-rejoins Sonos speakers when they drop out of an actively playing group, and re-runs the active music script if the master speaker itself dies. The blueprints live at:
+I want to install the **Sonos Watchdog** blueprint in my Home Assistant. Read
+https://github.com/cabaynes/sonos-watchdog/blob/main/README.md first. The blueprint is
+https://raw.githubusercontent.com/cabaynes/sonos-watchdog/main/blueprints/sonos_watchdog.yaml
 
-- https://raw.githubusercontent.com/cabaynes/sonos-watchdog/main/blueprints/sonos_watchdog_recovery.yaml
-- https://raw.githubusercontent.com/cabaynes/sonos-watchdog/main/blueprints/sonos_watchdog_sweep.yaml
-- https://raw.githubusercontent.com/cabaynes/sonos-watchdog/main/blueprints/sonos_watchdog_master_failover.yaml
+Please:
 
-The full README is at https://github.com/cabaynes/sonos-watchdog — read it first for context on the architecture and the music-script structure required for failover to work.
+1. Check API access (`GET /api/` should return `{"message":"API running."}`). Never print my token.
+2. List my Sonos `media_player` entities (use `integration_entities('sonos')` via `POST /api/template`) as a table of entity id, name and state, and ask me to confirm the list.
+3. Create the text helper `input_text.sonos_intended_speakers` with maximum length 255 (or reuse it if it exists — check first).
+4. Install the blueprint (the UI "Import blueprint" with the URL above, or the websocket `blueprint/import` + `blueprint/save` commands).
+5. Create one automation from it with my confirmed speakers and the helper, defaults for everything else, then confirm the new automation's state is `on`.
+6. Ask me whether I also want the optional log file and monthly totals from the README, and set them up only if I say yes (the log file needs one line in `configuration.yaml` and a restart — ask before restarting).
+7. If I have automations from v1/v2 of Sonos Watchdog (recovery, sweep, master failover, snapshot), list them and ask before disabling or deleting any.
 
-**Please:**
-
-1. Verify HA REST API access is working:
-   ```
-   curl -sS -H "Authorization: Bearer $HA_TOKEN" "$HA_URL/api/" 
-   ```
-   Expected: `{"message":"API running."}`
-
-2. Discover all my Sonos speakers by querying `/api/states` and filtering for `media_player.*` entities whose friendly name contains "Sonos" or whose entity_id matches typical Sonos patterns. Print a table of `entity_id | friendly_name | current_state` so I can confirm.
-
-3. Ask me two questions:
-   - **Which speakers should be monitored** for recovery? (Default: all of them.)
-   - **Which speakers should be auto-join candidates** in the sweep? (Default: same as above. Speakers excluded here will be left alone if they fall out of the group — useful for, say, a kid's bedroom you don't want music in unless explicitly chosen.)
-
-4. Download the two blueprint YAML files and place them in `/config/blueprints/automation/sonos-watchdog/` on the HA host (create the directory if it doesn't exist). My HA config dir is accessible at one of:
-   - `/Volumes/config/` (Samba mount on macOS)
-   - `/config/` (if running inside HA Container)
-   - via SSH to `homeassistant.local` (if SSH add-on is installed)
-   
-   Ask me which path applies if it's not obvious from my project.
-
-5. Reload blueprints via the API call:
-   ```
-   POST /api/services/homeassistant/reload_all
-   ```
-   (or have me trigger a manual reload via the HA UI if the API call doesn't pick up new blueprints).
-
-6. Create two automations from the blueprints — one from each blueprint — using my entity selections from step 3. Add them to my `automations.yaml` (or create a separate file if I prefer). After adding, run:
-   ```
-   POST /api/config/core/check_config
-   POST /api/services/automation/reload
-   ```
-
-7. Verify both automations are in `state: on`:
-   ```
-   GET /api/states/automation.<automation_id>
-   ```
-
-8. Tell me what to do next:
-   - Test the recovery edge by unplugging one speaker for 30 seconds, then plug back in. Should rejoin within 4–8 seconds if a group is playing.
-   - The sweep is harder to test deliberately; just trust that it'll catch silent drops within ~15 seconds.
-
-**Important constraints / things to know:**
-
-- **Don't read my `secrets.yaml`** with the Read tool — there are credentials in it. Use targeted `grep`/`awk` if you need to inspect.
-- **Validate YAML before reloading** — always run `POST /api/config/core/check_config` first, never blindly reload after editing.
-- **Confirm with me before deleting or overwriting any existing files** in `/config/`. If `automations.yaml` already has automations, append to it; don't replace.
-- **The blueprints assume Sonos integration is already set up in HA.** If `media_player.*` entities don't exist for my Sonos speakers, the integration needs to be configured first via Settings → Devices & Services → Add Integration → Sonos.
+Run `POST /api/config/core/check_config` before any reload or restart, and ask me before
+deleting or overwriting anything.
 
 ---
 
-## After installation
+## Testing it
 
-Once installed, the Sonos Watchdog runs in the background. Test it by:
-
-1. Start playing music across multiple Sonos speakers (HA script, Sonos app, or Sonos Voice — doesn't matter)
-2. Unplug one speaker for ~30 seconds
-3. Plug it back in
-4. Within 4–8 seconds, that speaker should rejoin the playing group at the master's current volume
-
-If anything doesn't work, paste the entity history of the dropped speaker (HA → Developer Tools → States → search for the speaker → History tab) into a follow-up Claude Code message — the state transitions are usually enough to diagnose.
+Start music on a group, unplug one speaker for about 30 seconds, plug it back in. Within a
+few seconds of it coming back it should rejoin, and the logbook (filter "Sonos Watchdog")
+shows `speaker_offline`, `speaker_left … offline`, `speaker_online` and `repair` or
+`speaker_back`.

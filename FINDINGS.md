@@ -1,6 +1,12 @@
 # Why Apple Music Drops on Multi-Speaker Sonos Groups
 
-**A diagnosis with reproducible methodology, May 2026.**
+**A diagnosis with reproducible methodology, May 2026 — updated November 2026.**
+
+> **Updated November 2026.** Later testing changed two things in this write-up: AirPlay to
+> several Sonos speakers is *not* a clean bypass (it forms a Sonos group with a relaying
+> leader), and silent dropouts can't be detected by software at all on current firmware.
+> Both are in [What we learned since](#what-we-learned-since-may-2026); the workaround list
+> below is corrected.
 
 For years, Sonos owners using Apple Music in multi-speaker groups have
 reported chronic audio dropouts: a second of music, several seconds of
@@ -11,7 +17,7 @@ configurations.
 
 This document explains **what's actually happening**, why it has
 nothing to do with your network, and what to do about it. The
-methodology is reproducible — see [`daemon/DIAGNOSTIC_GUIDE.md`](daemon/DIAGNOSTIC_GUIDE.md)
+methodology is reproducible — see [`tools/DIAGNOSTIC_GUIDE.md`](tools/DIAGNOSTIC_GUIDE.md)
 for the step-by-step instructions to verify these findings on your own
 system.
 
@@ -22,7 +28,7 @@ that doesn't scale when you combine multi-speaker groups with
 high-bitrate streams:
 
 1. The master speaker pulls audio from the CDN (sometimes with DRM)
-2. Decrypts and re-encodes
+2. Decodes it, and (we infer — Sonos doesn't document this) prepares it for the group
 3. Pushes the audio to each grouped satellite over a separate unicast
    stream
 4. Under high-bandwidth load (Apple Music at any quality on 4+ speakers,
@@ -49,9 +55,10 @@ catch it.
 
 1. Use **Spotify at 320 kbps ("Very High", non-lossless)** via the Sonos app — confirmed reliable on full-house groups
 2. Use **Sonos Radio / TuneIn** — confirmed reliable
-3. **Lossless via AirPlay 2 from any streaming app's iOS Control Center** — open Spotify, Apple Music, Tidal, etc., then use iOS's AirPlay picker (NOT the in-app Connect/Cast picker) to send to all Sonos speakers. Each speaker receives 16-bit/44.1 ALAC lossless via independent streams from your iPhone, bypassing Sonos's master-relay entirely. Works for ANY streaming service.
-4. For **native Sonos lossless via in-app Connect picker** (any service — Apple Music, Spotify Lossless, Tidal, Qobuz, Amazon HD): cap groups at **~3 speakers max**
-5. For native Sonos Apple Music at any quality: cap groups at **3 speakers max** (relay-side encryption + decryption tax pushes it lower than other services even at non-lossless tiers)
+3. **Keep a wired speaker as the group's leader** where you have one, and keep big groups off lossless.
+4. ~~Lossless via AirPlay 2 to all speakers~~ — **withdrawn.** Later testing showed AirPlay to several Sonos speakers forms a Sonos group whose leader relays to the others, so it hits the same bottleneck, and AirPlay was the *more* fragile path on a busy 2.4 GHz mesh. AirPlay to a **single** speaker is fine.
+5. For **native Sonos lossless via in-app Connect picker** (any service — Apple Music, Spotify Lossless, Tidal, Qobuz, Amazon HD): cap groups at **~3 speakers max**
+6. For native Sonos Apple Music at any quality: cap groups at **3 speakers max** (relay-side encryption + decryption tax pushes it lower than other services even at non-lossless tiers)
 
 **Quality tier caveat:** Sonos pulls streaming quality based on
 both your phone's controller setting AND a per-Sonos system-wide
@@ -61,12 +68,12 @@ enabled, but it produces the same multi-speaker dropout pattern as
 Apple Music due to the bandwidth bottleneck. Use the **"Lossless"
 badge in the Sonos app's Now Playing view** as ground truth for
 whether you're actually getting lossless. See
-[`daemon/DIAGNOSTIC_GUIDE.md`](daemon/DIAGNOSTIC_GUIDE.md#bonus-verifying-which-quality-tier-your-sonos-actually-pulls)
+[`tools/DIAGNOSTIC_GUIDE.md`](tools/DIAGNOSTIC_GUIDE.md#bonus-verifying-which-quality-tier-your-sonos-actually-pulls)
 for the verification procedure.
 
 ## How we diagnosed it
 
-The methodology used a Python daemon (in [`daemon/`](daemon/)) that
+The methodology used a Python recorder (in [`tools/`](tools/)) that
 talks directly to Sonos speakers via local UPnP + SOAP — bypassing Home
 Assistant, the Sonos app, and the Sonos cloud. Specifically:
 
@@ -79,7 +86,7 @@ Assistant, the Sonos app, and the Sonos cloud. Specifically:
   signal strength, PHY error counters, and channel info on every
   speaker.
 
-The full toolkit is in [`daemon/`](daemon/) and is reproducible by
+The full toolkit is in [`tools/`](tools/) and is reproducible by
 anyone with a Sonos household and ~10 minutes of setup.
 
 ## The test that proved it
@@ -187,7 +194,13 @@ keep the satellite streams fed without continuously pulling from the
 cloud, and recover from individual chunk delays without cascading
 failure.
 
-## Why AirPlay 2 avoids this
+## Why AirPlay 2 avoids this (single speaker only — see the update)
+
+> **Correction (May 29, 2026):** this section holds for AirPlay to **one** speaker. When you
+> AirPlay to **several** Sonos speakers, Sonos groups them and one speaker relays to the
+> rest — the recorder caught it (one speaker as group leader, the others as members, URI
+> `x-sonos-vli:…,airplay:…`). On our system it also started less reliably and dropped more
+> than Spotify Connect. Read the rest of this section with that in mind.
 
 AirPlay 2 is fundamentally different: there is **no master speaker**.
 Audio originates from the controller (your iPhone or Mac) and is
@@ -272,28 +285,59 @@ Nothing in the UPnP event stream fires. The speaker thinks it's
 playing the song correctly — its state machine is fine — it just has
 nothing in its audio buffer to output.
 
-To detect this kind of dropout programmatically, you'd need to **poll
-`current_track_position` (`RelativeTimePosition`)** on each satellite
-and check whether it's actually advancing in real time. If
-state=`PLAYING` but track position isn't advancing, the speaker is
-buffer-starved. We mention this for completeness — implementing a
-recovery system around it doesn't help much because there's no clean
-recovery action besides "restart the stream", which is what users do
-manually when they hit the problem.
+We hoped track position would give it away (`PLAYING` but the position
+not advancing). It doesn't: through audible dropouts the group kept
+reporting `PLAYING` with a steadily advancing position. And on 2026
+firmware the speakers' diagnostic pages no longer include anything about
+audio buffers (see the update below). As far as we can tell, **no
+software can detect this kind of dropout** — you can only hear it.
 
 The architectural workaround (use Spotify / Sonos Radio / AirPlay) is
 both easier and more robust than trying to recover from the symptom.
 
+## What we learned since May 2026
+
+Dated, oldest first. Measured on one household (wired Arc, SonosNet on 2.4 GHz, Play:5s,
+Beam, One, Roam, Move), so treat thresholds as ours, not universal.
+
+- **May 29 — AirPlay to several speakers relays too.** See the correction above. AirPlay
+  across the mesh/Wi-Fi boundary (a mesh speaker grouped with a Roam or Move) was the worst
+  case.
+- **May 29 — single-speaker AirPlay was flakier than Spotify Connect.** Same speaker, same
+  conditions: AirPlay had a 9-second blackout and a session restart in 3 minutes; Spotify
+  Connect played clean. AirPlay streams live from the phone with little buffer; Connect has
+  the speaker fetch with a buffer.
+- **May 29 — the 2.4 GHz mesh was congested; changing SonosNet channel helped.** Moving
+  from channel 1 to 11 cut idle radio errors 28–72 % per speaker. It improves the
+  foundation but doesn't remove the relay bottleneck.
+- **August 2026 — Spotify Lossless outside the Sonos app became possible.** Spotify
+  released Soloist, an official headless Spotify Connect client, and Music Assistant 2.10
+  made it its recommended Spotify engine. That doesn't change anything here: a big native
+  Sonos group still relays through one leader.
+- **Since 2025 — Sonos can switch local control off.** Sonos app → Account → Privacy &
+  Security → Connection Security → UPnP (on by default; Sonos's security advisory suggests
+  turning it off). With it off, Home Assistant's Sonos integration, the blueprint and these
+  tools can't reach the speakers.
+- **November 2026 — silent dropouts can't be measured.** On firmware 86.x the diagnostic
+  menu (`http://<speaker>:1400/status`) lists seven pages, older paths return empty, and
+  none counts audio buffer problems. The remaining network counters (dropped packets) move
+  the same on an idle speaker as on a playing one.
+- **November 2026 — never move a playing group's leader.** Handing the lead from a mesh
+  speaker to the wired Arc mid-song (`DelegateGroupCoordinationTo`) briefly made a third
+  speaker the leader, and the group stayed audibly out of sync until it was ungrouped and
+  regrouped while paused. With the Arc leading afterwards, the group sounded steadier to us
+  — a by-ear impression, not a measurement.
+
 ## What you can verify on your own setup
 
-The exact diagnostic toolkit and methodology is in [`daemon/`](daemon/).
-The README explains how to install + run; [`DIAGNOSTIC_GUIDE.md`](daemon/DIAGNOSTIC_GUIDE.md)
+The exact diagnostic toolkit and methodology is in [`tools/`](tools/).
+The README explains how to install + run; [`DIAGNOSTIC_GUIDE.md`](tools/DIAGNOSTIC_GUIDE.md)
 walks through the specific tests for confirming this finding on your
 own system.
 
 The minimum reproducer:
 
-1. Set up the daemon (3 commands)
+1. Set up the tools (3 commands)
 2. Form a 5+ speaker group
 3. Play 3 tracks back-to-back from Apple Music, Sonos Radio, and
    Spotify-via-Sonos-app
@@ -325,9 +369,9 @@ This diagnosis was carried out as part of building a direct-to-Sonos
 diagnostic toolkit using the local UPnP + SOAP APIs that every Sonos
 speaker exposes on port 1400. The community has been complaining
 about this issue for years on r/sonos, the Sonos community forum, and
-Apple Music threads. To our knowledge this is the first
-publicly-documented diagnostic methodology that proves the cause via
-side-by-side protocol comparison rather than guesswork.
+Apple Music threads. We haven't seen it documented this way
+elsewhere — a side-by-side comparison of sources on the same group
+rather than guesswork.
 
 If you reproduce this on your own setup (especially across different
 hardware mixes, firmware versions, or network configurations), open
