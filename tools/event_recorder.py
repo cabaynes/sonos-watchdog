@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Sonos Watchdog daemon - Phase 1 (observation only).
+Sonos event recorder — the tool behind FINDINGS.md.
 
-Subscribes to UPnP events on every discovered Sonos device and polls
-each speaker's mesh signal/PHY-error counters periodically. Every event
-and every poll is logged to a structured JSONL file for forensic
-analysis of dropouts.
+Subscribes to UPnP events (group topology, transport, volume) on every Sonos speaker and
+polls each speaker's mesh signal / PHY-error counters every 30 s. Everything goes to a
+JSONL file per day in tools/logs/ for later analysis. It observes only; it never sends
+commands. Run it while you reproduce a problem, then stop it (Ctrl+C).
 
-Phase 2 will add reactive recovery (rejoin on drop).
-Phase 3 will add proactive pre-emption (drop weak-link speakers).
+It cannot see silent in-group dropouts (see FINDINGS.md). Speakers are re-discovered every
+5 minutes, so a speaker that comes online after the start is picked up.
 """
 import json
 import logging
@@ -162,17 +162,17 @@ def poll_loop(zones):
 
 
 def snapshot_topology(zones):
-    """Write a topology snapshot record."""
-    coord = zones[0]
-    groups = []
-    try:
-        for g in coord.all_groups:
-            groups.append({
-                "coord": g.coordinator.player_name,
-                "members": sorted(m.player_name for m in g.members),
-            })
-    except Exception as e:
-        groups = [{"_error": str(e)}]
+    """Write a topology snapshot record, read from the first speaker that answers."""
+    groups, err = [], "no speaker answered"
+    for z in zones:
+        try:
+            groups = [{"coord": g.coordinator.player_name,
+                       "members": sorted(m.player_name for m in g.members)} for g in z.all_groups]
+            break
+        except Exception as e:
+            err = str(e)
+    if not groups:
+        groups = [{"_error": err}]
     write_record({"kind": "topology_snapshot", "groups": groups})
     log.info(f"topology: {groups}")
 
@@ -250,8 +250,15 @@ def main():
     last_snapshot = time.time()
     while not SHUTDOWN.is_set():
         time.sleep(1)
-        # Periodic full topology snapshot every 5 minutes
+        # Every 5 minutes: pick up speakers that came online later, and snapshot topology
         if time.time() - last_snapshot > 300:
+            fresh = {z.uid: z for z in (soco.discover(timeout=5) or [])}
+            known = {z.uid for z in zones}
+            new = [z for uid, z in fresh.items() if uid not in known]
+            if new:
+                log.info(f"new speakers: {[z.player_name for z in new]}")
+                subscribe_all(new)
+                zones.extend(new)
             snapshot_topology(zones)
             last_snapshot = time.time()
 

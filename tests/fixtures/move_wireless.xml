@@ -1,0 +1,2 @@
+<?xml version="1.0" ?>
+<?xml-stylesheet type="text/xsl" href="/xml/review.xsl"?><ZPSupportInfo><Wireless><WirelessInfo Name='Wireless Info'><WifiMode>1</WifiMode><WifiModeString>STATION_MODE</WifiModeString><IdleState>0x00000016</IdleState><BusyClients>NO_PRIMARY</BusyClients><SonosNetDisabled>0</SonosNetDisabled><ConnectionType>5</ConnectionType><ConnectionTypeString>WiFi</ConnectionTypeString></WirelessInfo></Wireless><!-- SDT: 0 ms --></ZPSupportInfo>

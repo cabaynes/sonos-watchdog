@@ -1,0 +1,16 @@
+<?xml version="1.0" ?>
+<?xml-stylesheet type="text/xsl" href="/xml/review.xsl"?><ZPSupportInfo><File name='/proc/ath_rincon/status'>Debug info for INFRA mode at 17832716
+
+Mode: INFRA (station)
+Operating on channel 5785
+   IEEE channel: 157
+RF Chains: RX:0 TX:0
+RF Chainmask: RX:0x00 TX:0x00
+Max Spatial Streams: RX:0 TX:0
+Noise Floor:    0 dBm (chain 0 ctl)
+Noise Floor:    0 dBm (chain 1 ctl)
+Noise Floor:    0 dBm (chain 2 ctl)
+Noise Floor:    0 dBm (chain 3 ctl)
+PHY errors since last reading/reset: 23958869    
+Region: 1
+</File><!-- SDT: 2 ms --></ZPSupportInfo>

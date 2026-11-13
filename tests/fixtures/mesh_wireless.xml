@@ -1,0 +1,2 @@
+<?xml version="1.0" ?>
+<?xml-stylesheet type="text/xsl" href="/xml/review.xsl"?><ZPSupportInfo><Wireless><WirelessInfo Name='Wireless Info'><WifiMode>0</WifiMode><WifiModeString>SONOSNET_MODE</WifiModeString><IdleState>0x00000004</IdleState><BusyClients>LOCAL_SONOSNET, NO_PRIMARY</BusyClients><SonosNetDisabled>0</SonosNetDisabled><ConnectionType>2</ConnectionType><ConnectionTypeString>SonosNet (wireless)</ConnectionTypeString></WirelessInfo></Wireless><!-- SDT: 0 ms --></ZPSupportInfo>

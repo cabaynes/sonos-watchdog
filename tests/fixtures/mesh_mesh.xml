@@ -1,0 +1,38 @@
+<?xml version="1.0" ?>
+<?xml-stylesheet type="text/xsl" href="/xml/review.xsl"?><ZPSupportInfo><File name='/proc/ath_rincon/status'>Debug info for INFRA mode at 1867876
+
+Mode: INFRA (sonosnet)
+Operating on channel 2462
+   IEEE channel: 11
+Home channel is 2462
+   IEEE channel: 11
+RF Chains: RX:3 TX:3
+RF Chainmask: RX:0x07 TX:0x07
+Max Spatial Streams: RX:3 TX:3
+Noise Floor: -104 dBm (chain 0 ctl)
+Noise Floor: -106 dBm (chain 1 ctl)
+Noise Floor: -107 dBm (chain 2 ctl)
+PHY errors since last reading/reset: 11207323    
+OFDM ANI level: 9
+Ch11 Spur Immunity Level: 0
+HAL Reset Failures: cnt: 0 last: 0
+Temperature C: 27
+Region: 1
+PA rail mvolts: 5127
+
+Not ignoring non-sat probes
+
+Not ignoring probes from Boost
+
+Node AA:BB:CC:00:00:01 - FROM 54 : TO 61 : STP 04 : MODEL 23.1: KEY 8
+  54
+
+Node AA:BB:CC:00:00:02 - FROM 50 : TO 50 : STP 04 : MODEL 21.1: KEY 7
+  50
+
+Node AA:BB:CC:00:00:03 - FROM 58 : TO 68 : STP 03 : MODEL 27.1: KEY 6
+  58
+
+Node AA:BB:CC:00:00:04 - FROM 52 : TO 50 : STP 03 : MODEL 13.1: KEY 5
+  52
+</File><!-- SDT: 1 ms --></ZPSupportInfo>

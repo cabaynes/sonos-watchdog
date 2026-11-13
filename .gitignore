@@ -31,3 +31,9 @@ grill-me-sessions/
 .playwright-mcp/
 .taste-skill/
 # --- end workspace baseline ---
+
+# Local diagnostic data — never published
+daemon/
+tools/logs/
+tools/labels.local.json
+.superpowers/

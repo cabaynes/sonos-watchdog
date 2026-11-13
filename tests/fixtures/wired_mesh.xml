@@ -1,0 +1,46 @@
+<?xml version="1.0" ?>
+<?xml-stylesheet type="text/xsl" href="/xml/review.xsl"?><ZPSupportInfo><File name='/proc/ath_rincon/status'>Debug info for INFRA mode at 17832715
+
+Mode: INFRA (sonosnet)
+Operating on channel 2462
+   IEEE channel: 11
+Home channel is 2462
+   IEEE channel: 11
+HT Channel is 0
+   IEEE channel: 0
+HT AP mode: on
+RF Chains: RX:4 TX:4
+RF Chainmask: RX:0x0F TX:0x0F
+Max Spatial Streams: RX:4 TX:4
+Noise Floor:    0 dBm (chain 0 ctl)
+Noise Floor:    0 dBm (chain 1 ctl)
+Noise Floor:    0 dBm (chain 2 ctl)
+Noise Floor:    0 dBm (chain 3 ctl)
+PHY errors since last reading/reset: 16191768    
+Region: 1
+
+Not ignoring non-sat probes
+
+Not ignoring probes from Boost
+
+Node AA:BB:CC:00:00:01 - FROM 50 : TO 48 : STP 03 : MODEL 23.1: KEY 11
+  50
+
+Node AA:BB:CC:00:00:02 - FROM 49 : TO 42 : STP 03 : MODEL 21.1: KEY 10
+  49
+
+Node AA:BB:CC:00:00:05 - FROM 62 : TO 54 : STP 03 : MODEL 21.1: KEY 8
+  62
+
+Node AA:BB:CC:00:00:06 - FROM 64 : TO 54 : STP 03 : MODEL 21.1: KEY 5
+  64
+
+Node AA:BB:CC:00:00:04 - FROM 65 : TO 55 : STP 03 : MODEL 13.1: KEY 7
+  65
+
+Node AA:BB:CC:00:00:07 - FROM 68 : TO 58 : STP 03 : MODEL 13.1: KEY 6
+  68
+
+Node AA:BB:CC:00:00:08 - FROM 63 : TO 54 : STP 03 : MODEL 8.6: KEY 9
+  63
+</File><!-- SDT: 1 ms --></ZPSupportInfo>
