@@ -1,0 +1,209 @@
+blueprint:
+  name: Sonos Watchdog
+  description: >
+    Brings a Sonos speaker back into the group you were playing when it drops off the
+    network and comes back. It never undoes a change you made yourself: a speaker that
+    leaves the group while still online (you ungrouped it, or switched to a smaller
+    group or preset) is left alone.
+
+
+    It cannot see or fix the other kind of Sonos dropout, where a speaker stays in the
+    group but goes silent. See FINDINGS.md in the repository for why.
+
+
+    Needs one text helper (max length 255) to remember which speakers belong to the
+    session.
+  domain: automation
+  source_url: https://github.com/cabaynes/sonos-watchdog/blob/main/blueprints/sonos_watchdog.yaml
+  input:
+    speakers:
+      name: Sonos speakers
+      description: Every Sonos speaker to watch.
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+    intended_helper:
+      name: Session helper
+      description: >
+        A text helper (input_text, max length 255) where the watchdog stores which speakers
+        belong to the current session. Create it under Settings → Devices & services → Helpers.
+      default: input_text.sonos_intended_speakers
+      selector:
+        entity:
+          domain: input_text
+    settle_seconds:
+      name: Settle time (seconds)
+      description: >
+        How long a smaller group must stay smaller before the watchdog decides why a speaker
+        left: offline (it will be brought back) or still online (your change, left alone).
+      default: 60
+      selector:
+        number: {min: 10, max: 600, unit_of_measurement: seconds}
+    recovery_seconds:
+      name: Wait after a speaker comes back (seconds)
+      description: Sonos speakers answer the network slightly before they accept commands.
+      default: 3
+      selector:
+        number: {min: 1, max: 30, unit_of_measurement: seconds}
+    forget_minutes:
+      name: Forget the session after (minutes)
+      description: After this long with nothing playing, the session is over and forgotten.
+      default: 15
+      selector:
+        number: {min: 1, max: 240, unit_of_measurement: minutes}
+
+mode: queued
+max: 10
+max_exceeded: silent
+
+triggers:
+  - trigger: state
+    id: grew_or_started
+    entity_id: !input speakers
+    attribute: group_members
+  - trigger: state
+    id: grew_or_started
+    entity_id: !input speakers
+    to: playing
+  - trigger: state
+    id: settled
+    entity_id: !input speakers
+    attribute: group_members
+    for:
+      seconds: !input settle_seconds
+  - trigger: state
+    id: back_online
+    entity_id: !input speakers
+    from: unavailable
+    to: [idle, paused]
+    for:
+      seconds: !input recovery_seconds
+  - trigger: state
+    id: went_offline
+    entity_id: !input speakers
+    to: unavailable
+  - trigger: time_pattern
+    id: sweep
+    seconds: /10
+  - trigger: state
+    id: went_quiet
+    entity_id: !input speakers
+    from: playing
+    for:
+      minutes: !input forget_minutes
+
+variables:
+  speakers: !input speakers
+  helper: !input intended_helper
+  raw: "{{ states(helper) if states(helper) not in ['unknown', 'unavailable'] else '' }}"
+  stored: >-
+    {%- if '|' in raw -%}
+      {%- set parts = raw.split('|', 1) -%}
+      {%- set start = parts[0] | int(none) -%}
+      {%- set m = parts[1] -%}
+    {%- else -%}
+      {%- set start = none -%}
+      {%- set m = raw -%}
+    {%- endif -%}
+    {{ {'start': start, 'members': m.split(',') | map('trim') | reject('eq', '') | list} }}
+  session_master: >-
+    {%- set ns = namespace(m=none) -%}
+    {%- for s in speakers -%}
+      {%- set g = state_attr(s, 'group_members') or [] -%}
+      {%- if ns.m is none and is_state(s, 'playing') and g and g[0] == s -%}
+        {%- if stored.members and (g | select('in', stored.members) | list | length) > 0 -%}
+          {%- set ns.m = s -%}
+        {%- elif not stored.members and (g | length) > 1 -%}
+          {%- set ns.m = s -%}
+        {%- endif -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{ ns.m }}
+  master_group: "{{ (state_attr(session_master, 'group_members') or []) if session_master else [] }}"
+  missing: >-
+    {%- set ns = namespace(m=[]) -%}
+    {%- if session_master -%}
+      {%- for s in stored.members -%}
+        {%- set g = state_attr(s, 'group_members') or [] -%}
+        {%- if s not in master_group and states(s) in ['idle', 'paused'] and (g | length) < 2 -%}
+          {%- set ns.m = ns.m + [s] -%}
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+    {{ ns.m }}
+  trig: "{{ trigger.entity_id if trigger.entity_id is defined and trigger.entity_id else '' }}"
+  trig_group: "{{ (state_attr(trig, 'group_members') or []) if trig else [] }}"
+  trigger_is_coordinator: "{{ trig != '' and is_state(trig, 'playing') and (trig_group | length) > 0 and trig_group[0] == trig }}"
+  same_session: "{{ (trig_group | select('in', stored.members) | list | length) > 0 }}"
+  new_members: >-
+    {%- if trigger_is_coordinator -%}
+      {%- set ns = namespace(m=trig_group | list) -%}
+      {%- if same_session -%}
+        {%- for s in stored.members -%}
+          {%- if s not in ns.m and is_state(s, 'unavailable') -%}
+            {%- set ns.m = ns.m + [s] -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endif -%}
+      {{ ns.m }}
+    {%- else -%}
+      {{ stored.members }}
+    {%- endif -%}
+  departed_online: >-
+    {%- set ns = namespace(m=[]) -%}
+    {%- if trigger_is_coordinator and same_session -%}
+      {%- for s in stored.members -%}
+        {%- if s not in trig_group and not is_state(s, 'unavailable') -%}
+          {%- set ns.m = ns.m + [s] -%}
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+    {{ ns.m }}
+  departed_offline: >-
+    {%- set ns = namespace(m=[]) -%}
+    {%- if trigger_is_coordinator and same_session -%}
+      {%- for s in stored.members -%}
+        {%- if s not in trig_group and is_state(s, 'unavailable') -%}
+          {%- set ns.m = ns.m + [s] -%}
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+    {{ ns.m }}
+  grew: "{{ (new_members | reject('in', stored.members) | list | length) > 0 }}"
+  record: >-
+    {%- set tid = trigger.id if trigger.id is defined else '' -%}
+    {%- if not trigger_is_coordinator -%}
+      {{ false }}
+    {%- elif tid == 'grew_or_started' -%}
+      {{ (not stored.members) or (not same_session) or grew }}
+    {%- elif tid == 'settled' -%}
+      {{ (new_members | sort) != (stored.members | sort) }}
+    {%- else -%}
+      {{ false }}
+    {%- endif -%}
+  session_playing: "{{ (stored.members | select('is_state', 'playing') | list | length) > 0 }}"
+
+actions:
+  - choose:
+      - conditions: "{{ record }}"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ helper }}"
+            data:
+              value: "{{ new_members | join(',') }}"
+      - conditions: "{{ trigger.id in ['back_online', 'sweep'] and session_master is not none and (missing | length) > 0 }}"
+        sequence:
+          - action: media_player.join
+            target:
+              entity_id: "{{ session_master }}"
+            data:
+              group_members: "{{ missing }}"
+      - conditions: "{{ trigger.id == 'went_quiet' and (stored.members | length) > 0 and not session_playing }}"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ helper }}"
+            data:
+              value: ""

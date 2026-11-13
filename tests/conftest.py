@@ -14,6 +14,7 @@ BLUEPRINT = ROOT / "blueprints" / "sonos_watchdog.yaml"
 LR, K, O, ROAM, BED, BATH, MOVE = (f"media_player.{n}" for n in
                                    ("living_room", "kitchen", "office", "roam", "bedroom", "bathroom", "move"))
 SPEAKERS7 = [LR, K, O, ROAM, BED, BATH, MOVE]
+HELPER = "input_text.sonos_intended_speakers"
 
 
 def make_state(state, group=None, content=None, last_changed=0.0, **attrs):
