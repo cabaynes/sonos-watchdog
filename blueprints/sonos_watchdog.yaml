@@ -52,6 +52,43 @@ blueprint:
       default: 15
       selector:
         number: {min: 1, max: 240, unit_of_measurement: minutes}
+    wired_speakers:
+      name: Wired speakers (optional)
+      description: Speakers connected by Ethernet. Each session's log line says whether one of them leads.
+      default: []
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+    log_notify:
+      name: Log file (optional)
+      description: >
+        A notify entity from the File integration. Every event is appended as one line
+        (time,event,subject,detail), so the history outlives the logbook's ~10 days.
+      default: ""
+      selector:
+        entity:
+          domain: notify
+    counter_sessions:
+      name: Sessions counter (optional)
+      default: ""
+      selector:
+        entity: {domain: counter}
+    counter_left:
+      name: Speakers-left counter (optional)
+      default: ""
+      selector:
+        entity: {domain: counter}
+    counter_offline:
+      name: Speakers-offline counter (optional)
+      default: ""
+      selector:
+        entity: {domain: counter}
+    counter_repairs:
+      name: Repairs counter (optional)
+      default: ""
+      selector:
+        entity: {domain: counter}
 
 mode: queued
 max: 10
@@ -96,6 +133,14 @@ triggers:
 variables:
   speakers: !input speakers
   helper: !input intended_helper
+  wired_speakers: !input wired_speakers
+  log_notify: !input log_notify
+  counter_sessions: !input counter_sessions
+  counter_left: !input counter_left
+  counter_offline: !input counter_offline
+  counter_repairs: !input counter_repairs
+  tid: "{{ trigger.id if trigger.id is defined else '' }}"
+  now_ts: "{{ as_timestamp(now()) | int }}"
   raw: "{{ states(helper) if states(helper) not in ['unknown', 'unavailable'] else '' }}"
   stored: >-
     {%- if '|' in raw -%}
@@ -150,11 +195,17 @@ variables:
     {%- else -%}
       {{ stored.members }}
     {%- endif -%}
+  prev_group: >-
+    {%- if trigger.from_state is defined and trigger.from_state and trigger.from_state.attributes is defined -%}
+      {{ trigger.from_state.attributes.group_members or [] }}
+    {%- else -%}
+      {{ [] }}
+    {%- endif -%}
   departed_online: >-
     {%- set ns = namespace(m=[]) -%}
-    {%- if trigger_is_coordinator and same_session -%}
-      {%- for s in stored.members -%}
-        {%- if s not in trig_group and not is_state(s, 'unavailable') -%}
+    {%- if tid == 'settled' and trigger_is_coordinator and same_session -%}
+      {%- for s in prev_group -%}
+        {%- if s not in trig_group and s in stored.members and not is_state(s, 'unavailable') -%}
           {%- set ns.m = ns.m + [s] -%}
         {%- endif -%}
       {%- endfor -%}
@@ -162,27 +213,111 @@ variables:
     {{ ns.m }}
   departed_offline: >-
     {%- set ns = namespace(m=[]) -%}
-    {%- if trigger_is_coordinator and same_session -%}
-      {%- for s in stored.members -%}
-        {%- if s not in trig_group and is_state(s, 'unavailable') -%}
+    {%- if tid == 'settled' and trigger_is_coordinator and same_session -%}
+      {%- for s in prev_group -%}
+        {%- if s not in trig_group and s in stored.members and is_state(s, 'unavailable') -%}
           {%- set ns.m = ns.m + [s] -%}
         {%- endif -%}
       {%- endfor -%}
     {%- endif -%}
     {{ ns.m }}
   grew: "{{ (new_members | reject('in', stored.members) | list | length) > 0 }}"
+  new_session: "{{ trigger_is_coordinator and ((not stored.members) or (not same_session)) }}"
   record: >-
-    {%- set tid = trigger.id if trigger.id is defined else '' -%}
     {%- if not trigger_is_coordinator -%}
       {{ false }}
     {%- elif tid == 'grew_or_started' -%}
-      {{ (not stored.members) or (not same_session) or grew }}
+      {{ new_session or grew }}
     {%- elif tid == 'settled' -%}
       {{ (new_members | sort) != (stored.members | sort) }}
     {%- else -%}
       {{ false }}
     {%- endif -%}
   session_playing: "{{ (stored.members | select('is_state', 'playing') | list | length) > 0 }}"
+  do_repair: "{{ tid in ['back_online', 'sweep'] and session_master is not none and (missing | length) > 0 }}"
+  do_forget: "{{ tid == 'went_quiet' and (stored.members | length) > 0 and not session_playing }}"
+  leader: "{{ trig if trigger_is_coordinator else (session_master or '') }}"
+  source: >-
+    {%- set c = ((state_attr(leader, 'media_content_id') or '') if leader else '') | string -%}
+    {%- if c.startswith('x-sonos-spotify:') -%}Spotify
+    {%- elif 'sid=204' in c -%}Apple Music
+    {%- elif c.startswith('x-sonos-vli:') and 'airplay' in c -%}AirPlay
+    {%- elif c.startswith('x-sonos-htastream:') -%}TV
+    {%- elif c.startswith('x-rincon-mp3radio:') or c.startswith('x-sonos-http:sonos') or c.startswith('x-sonosapi-') -%}Radio
+    {%- elif c.startswith('x-rincon-stream:') -%}Line-in
+    {%- else -%}Other
+    {%- endif -%}
+  wired: "{{ 'n/a' if not wired_speakers else ('yes' if leader in wired_speakers else 'no') }}"
+  helper_value: >-
+    {%- set start = stored.start if (same_session and stored.start) else now_ts -%}
+    {%- set ns = namespace(v=(start | string) ~ '|', first=true, full=false) -%}
+    {%- for s in new_members -%}
+      {%- set add = s if ns.first else ',' ~ s -%}
+      {%- if not ns.full and ((ns.v ~ add) | length) <= 255 -%}
+        {%- set ns.v = ns.v ~ add -%}
+        {%- set ns.first = false -%}
+      {%- else -%}
+        {%- set ns.full = true -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{ ns.v }}
+  helper_full: "{{ (helper_value.split('|', 1)[1].split(',') | length) < (new_members | length) }}"
+  away_s: >-
+    {%- if tid == 'back_online' and trigger.from_state is defined and trigger.from_state -%}
+      {{ (now_ts - as_timestamp(trigger.from_state.last_changed, now_ts)) | int }}
+    {%- else -%}
+      {{ 0 }}
+    {%- endif -%}
+  log_events: >-
+    {%- set ns = namespace(e=[], why=[]) -%}
+    {%- set full = '; helper full' if helper_full else '' -%}
+    {%- set members_txt = new_members | join(';') -%}
+    {%- set ended = 'duration_s=' ~ (now_ts - stored.start) if stored.start else 'duration=unknown' -%}
+    {%- if record and new_session -%}
+      {%- if stored.members -%}
+        {%- set ns.e = ns.e + [{'event': 'session_end', 'subject': stored.members[0], 'detail': ended}] -%}
+      {%- endif -%}
+      {%- set ns.e = ns.e + [{'event': 'session_start', 'subject': leader,
+          'detail': 'leader=' ~ leader ~ '; members=' ~ members_txt ~ '; source=' ~ source ~ '; wired=' ~ wired ~ full}] -%}
+    {%- elif record or departed_online or departed_offline -%}
+      {%- for s in departed_online -%}
+        {%- set ns.e = ns.e + [{'event': 'speaker_left', 'subject': s, 'detail': 'online; leader=' ~ leader}] -%}
+      {%- endfor -%}
+      {%- for s in departed_offline -%}
+        {%- set ns.e = ns.e + [{'event': 'speaker_left', 'subject': s, 'detail': 'offline; leader=' ~ leader}] -%}
+      {%- endfor -%}
+      {%- if grew -%}{%- set ns.why = ns.why + ['grew'] -%}{%- endif -%}
+      {%- if departed_offline -%}{%- set ns.why = ns.why + ['went offline'] -%}{%- endif -%}
+      {%- if departed_online -%}{%- set ns.why = ns.why + ['left on purpose'] -%}{%- endif -%}
+      {%- set ns.e = ns.e + [{'event': 'session_change', 'subject': leader,
+          'detail': 'before=' ~ (stored.members | join(';')) ~ '; after=' ~ members_txt ~ '; why=' ~ (ns.why | join(' + ')) ~ full}] -%}
+    {%- endif -%}
+    {%- if tid == 'went_offline' and trig -%}
+      {%- set ns.e = ns.e + [{'event': 'speaker_offline', 'subject': trig,
+          'detail': 'in_session=' ~ ('yes' if trig in stored.members else 'no')}] -%}
+    {%- endif -%}
+    {%- if tid == 'back_online' and trig -%}
+      {%- set ns.e = ns.e + [{'event': 'speaker_online', 'subject': trig, 'detail': 'offline_s=' ~ away_s}] -%}
+      {%- if session_master and trig in master_group -%}
+        {%- set ns.e = ns.e + [{'event': 'speaker_back', 'subject': trig, 'detail': 'by=sonos; away_s=' ~ away_s}] -%}
+      {%- elif do_repair and trig in missing -%}
+        {%- set ns.e = ns.e + [{'event': 'repair', 'subject': missing | join(';'),
+            'detail': 'path=back_online; leader=' ~ session_master}] -%}
+        {%- set ns.e = ns.e + [{'event': 'speaker_back', 'subject': trig, 'detail': 'by=watchdog; away_s=' ~ away_s}] -%}
+      {%- endif -%}
+    {%- endif -%}
+    {%- if tid == 'sweep' and do_repair -%}
+      {%- set ns.e = ns.e + [{'event': 'repair', 'subject': missing | join(';'), 'detail': 'path=sweep; leader=' ~ session_master}] -%}
+    {%- endif -%}
+    {%- if do_forget -%}
+      {%- set ns.e = ns.e + [{'event': 'session_end', 'subject': stored.members[0], 'detail': ended}] -%}
+    {%- endif -%}
+    {{ ns.e }}
+  act: "{{ record or do_repair or do_forget or (log_events | length) > 0 }}"
+
+conditions:
+  - condition: template
+    value_template: "{{ act }}"
 
 actions:
   - choose:
@@ -192,18 +327,41 @@ actions:
             target:
               entity_id: "{{ helper }}"
             data:
-              value: "{{ new_members | join(',') }}"
-      - conditions: "{{ trigger.id in ['back_online', 'sweep'] and session_master is not none and (missing | length) > 0 }}"
+              value: "{{ helper_value }}"
+      - conditions: "{{ do_repair }}"
         sequence:
           - action: media_player.join
             target:
               entity_id: "{{ session_master }}"
             data:
               group_members: "{{ missing }}"
-      - conditions: "{{ trigger.id == 'went_quiet' and (stored.members | length) > 0 and not session_playing }}"
+      - conditions: "{{ do_forget }}"
         sequence:
           - action: input_text.set_value
             target:
               entity_id: "{{ helper }}"
             data:
               value: ""
+  - repeat:
+      for_each: "{{ log_events }}"
+      sequence:
+        - action: logbook.log
+          data:
+            name: Sonos Watchdog
+            message: "{{ repeat.item.event }}: {{ repeat.item.subject }} ({{ repeat.item.detail }})"
+        - if: "{{ log_notify not in [none, ''] }}"
+          then:
+            - action: notify.send_message
+              target:
+                entity_id: "{{ log_notify }}"
+              data:
+                message: "{{ now().isoformat() }},{{ repeat.item.event }},{{ repeat.item.subject }},{{ repeat.item.detail }}"
+        - variables:
+            counter_for_event: >-
+              {{ {'session_start': counter_sessions, 'speaker_left': counter_left,
+                  'speaker_offline': counter_offline, 'repair': counter_repairs}.get(repeat.item.event, '') }}
+        - if: "{{ counter_for_event not in [none, ''] }}"
+          then:
+            - action: counter.increment
+              target:
+                entity_id: "{{ counter_for_event }}"

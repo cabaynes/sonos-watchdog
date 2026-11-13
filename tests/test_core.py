@@ -1,18 +1,11 @@
 """Session detection, the record rule, and repair targeting (spec: The design / record rule)."""
-from conftest import BATH, BED, HELPER, K, LR, O, ROAM, make_state, make_trigger
-from harness import render_vars
+from conftest import BATH, BED, K, LR, O, ROAM, make_state, make_trigger, render_bp
 
 GROUP4 = [LR, K, O, ROAM]
 
 
 def render(blueprint, speakers7, states, helper_value="", trigger=None, now=1_000_000):
-    states = dict(states)
-    states[HELPER] = make_state(helper_value)
-    for s in speakers7:
-        states.setdefault(s, make_state("idle", group=[s]))
-    inputs = {"speakers": speakers7, "intended_helper": HELPER, "settle_seconds": 60,
-              "recovery_seconds": 3, "forget_minutes": 15}
-    return render_vars(blueprint, inputs, states, trigger=trigger, now=now)
+    return render_bp(blueprint, speakers7, states, helper_value, trigger, now)
 
 
 def playing_group(group, **extra):
@@ -48,7 +41,7 @@ def test_busy_speaker_never_missing(blueprint, speakers7):
 
 def test_online_leaver_dropped_on_settle(blueprint, speakers7):
     states = playing_group([LR, K, ROAM], **{O: make_state("paused", group=[O])})
-    trig = make_trigger("settled", LR, to_state=states[LR])
+    trig = make_trigger("settled", LR, to_state=states[LR], from_state=make_state("playing", group=GROUP4))
     v = render(blueprint, speakers7, states, helper_value=",".join(GROUP4), trigger=trig)
     assert v["new_members"] == [LR, K, ROAM]
     assert v["departed_online"] == [O]
@@ -58,7 +51,7 @@ def test_online_leaver_dropped_on_settle(blueprint, speakers7):
 
 def test_offline_leaver_kept_on_settle(blueprint, speakers7):
     states = playing_group([LR, K, ROAM], **{O: make_state("unavailable")})
-    trig = make_trigger("settled", LR, to_state=states[LR])
+    trig = make_trigger("settled", LR, to_state=states[LR], from_state=make_state("playing", group=GROUP4))
     v = render(blueprint, speakers7, states, helper_value=",".join(GROUP4), trigger=trig)
     assert v["new_members"] == [LR, K, ROAM, O]
     assert v["departed_offline"] == [O]
@@ -69,7 +62,7 @@ def test_ungroup_to_one_room_records_solo(blueprint, speakers7):
     states = {LR: make_state("playing", group=[LR]),
               K: make_state("paused", group=[K]), O: make_state("paused", group=[O]),
               ROAM: make_state("paused", group=[ROAM])}
-    trig = make_trigger("settled", LR, to_state=states[LR])
+    trig = make_trigger("settled", LR, to_state=states[LR], from_state=make_state("playing", group=GROUP4))
     v = render(blueprint, speakers7, states, helper_value=",".join(GROUP4), trigger=trig)
     assert v["new_members"] == [LR]
     after = render(blueprint, speakers7, states, helper_value=LR)
@@ -101,3 +94,10 @@ def test_no_session_no_master(blueprint, speakers7):
     v = render(blueprint, speakers7, {}, helper_value="")
     assert v["session_master"] is None
     assert v["missing"] == []
+
+
+def test_idle_sweep_does_not_act(blueprint, speakers7):
+    """A sweep with nothing to do must not run actions (else HA logs 'triggered' every 10 s)."""
+    trig = {"id": "sweep"}
+    v = render(blueprint, speakers7, playing_group(GROUP4), helper_value=",".join(GROUP4), trigger=trig)
+    assert v["act"] is False

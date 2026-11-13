@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from harness import State, load_blueprint  # noqa: E402
+from harness import State, load_blueprint, render_vars  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 BLUEPRINT = ROOT / "blueprints" / "sonos_watchdog.yaml"
@@ -47,3 +47,16 @@ def speakers7():
 @pytest.fixture
 def blueprint():
     return load_blueprint(BLUEPRINT)
+
+
+def render_bp(blueprint, speakers, states, helper_value="", trigger=None, now=1_000_000, **inputs):
+    """Render the watchdog blueprint's variables; unspecified speakers default to idle and solo."""
+    states = dict(states)
+    states[HELPER] = make_state(helper_value)
+    for s in speakers:
+        states.setdefault(s, make_state("idle", group=[s]))
+    base = {"speakers": speakers, "intended_helper": HELPER, "settle_seconds": 60, "recovery_seconds": 3,
+            "forget_minutes": 15, "log_notify": "", "counter_sessions": "", "counter_left": "",
+            "counter_offline": "", "counter_repairs": "", "wired_speakers": []}
+    base.update(inputs)
+    return render_vars(blueprint, base, states, trigger=trigger, now=now)
