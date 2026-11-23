@@ -327,6 +327,11 @@ Beam, One, Roam, Move), so treat thresholds as ours, not universal.
   speaker the leader, and the group stayed audibly out of sync until it was ungrouped and
   regrouped while paused. With the Arc leading afterwards, the group sounded steadier to us
   — a by-ear impression, not a measurement.
+- **November 23, 2026 — but moving the leader during a pause is safe.** The same handover on
+  a paused seven-speaker group, Arc → Kitchen and back, kept the song, position and queue,
+  and every room was in sync on resume. Pressing play in the middle of a handover was
+  ignored rather than breaking anything. The blueprint's optional "wired speaker leads"
+  setting uses this (see docs/wired-leader.md).
 
 ## What you can verify on your own setup
 

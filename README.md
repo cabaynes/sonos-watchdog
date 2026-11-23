@@ -31,7 +31,8 @@ smaller groups, a wired speaker leading).
 - **Pull in a busy speaker.** A speaker playing something of its own, or grouped with
   others, is never taken.
 - **Change the group's leader while music plays.** We tried it: the group went out of
-  sync until it was rebuilt (see FINDINGS.md).
+  sync until it was rebuilt. (During a pause it's safe, and the optional
+  [wired-leader setting](docs/wired-leader.md) uses that.)
 
 ## Install
 
@@ -51,7 +52,8 @@ That's the whole install. The settings:
 | Settle time | 60 s | How long a smaller group must stay smaller before the watchdog decides why a speaker left (offline → it will be brought back; still online → your change). |
 | Wait after a speaker comes back | 3 s | Sonos speakers answer the network slightly before they accept commands. |
 | Forget the session after | 15 min | With nothing playing for this long, the session is over. Pausing for a few minutes keeps it. |
-| Wired speakers | none | Speakers on Ethernet. Each session's log line then says whether one of them led. |
+| Wired speakers | none | Speakers on Ethernet. Each session's log line says whether one of them led; with the optional handover command, one takes the lead during pauses. |
+| Handover command, hand over after | none, 30 s | See [docs/wired-leader.md](docs/wired-leader.md). |
 | Log file, counters | none | Optional — see below. |
 
 ### Optional: a log file that outlives the logbook
@@ -81,6 +83,7 @@ Each event is one line: `time,event,subject,detail`, for example
 | `speaker_offline` / `speaker_online` | Any watched speaker went unavailable / came back (with how long). |
 | `speaker_back` | A speaker that went offline is back in the group — `by=sonos` (Sonos did it) or `by=watchdog`. |
 | `repair` | The watchdog sent a join. |
+| `leader_moved` | During a pause, the lead moved to a wired speaker. |
 
 ### Optional: monthly totals kept forever
 

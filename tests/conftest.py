@@ -49,7 +49,7 @@ def blueprint():
     return load_blueprint(BLUEPRINT)
 
 
-def render_bp(blueprint, speakers, states, helper_value="", trigger=None, now=1_000_000, **inputs):
+def render_bp(blueprint, speakers, states, helper_value="", trigger=None, now=1_000_000, devices=None, **inputs):
     """Render the watchdog blueprint's variables; unspecified speakers default to idle and solo."""
     states = dict(states)
     states[HELPER] = make_state(helper_value)
@@ -57,6 +57,7 @@ def render_bp(blueprint, speakers, states, helper_value="", trigger=None, now=1_
         states.setdefault(s, make_state("idle", group=[s]))
     base = {"speakers": speakers, "intended_helper": HELPER, "settle_seconds": 60, "recovery_seconds": 3,
             "forget_minutes": 15, "log_notify": "", "counter_sessions": "", "counter_left": "",
-            "counter_offline": "", "counter_repairs": "", "wired_speakers": []}
+            "counter_offline": "", "counter_repairs": "", "wired_speakers": [],
+            "handover_command": "", "handover_after_pause": 30}
     base.update(inputs)
-    return render_vars(blueprint, base, states, trigger=trigger, now=now)
+    return render_vars(blueprint, base, states, trigger=trigger, now=now, devices=devices)

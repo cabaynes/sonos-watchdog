@@ -54,12 +54,32 @@ blueprint:
         number: {min: 1, max: 240, unit_of_measurement: minutes}
     wired_speakers:
       name: Wired speakers (optional)
-      description: Speakers connected by Ethernet. Each session's log line says whether one of them leads.
+      description: >
+        Speakers connected by Ethernet. Each session's log line says whether one of them
+        leads, and with a handover command (below) a wired speaker takes the lead whenever
+        its group has been paused for a while.
       default: []
       selector:
         entity:
           domain: media_player
           multiple: true
+    handover_command:
+      name: Handover command (optional)
+      description: >
+        The rest_command that asks a Sonos speaker to hand its group to another speaker, e.g.
+        rest_command.sonos_delegate. Set it up first — see docs/wired-leader.md. Leave empty
+        to only log who leads.
+      default: ""
+      selector:
+        text:
+    handover_after_pause:
+      name: Hand over after a pause of (seconds)
+      description: >
+        The lead only ever moves while the group is paused (moving it mid-song puts the
+        group out of sync). This is how long the pause must last first.
+      default: 30
+      selector:
+        number: {min: 10, max: 600, unit_of_measurement: seconds}
     log_notify:
       name: Log file (optional)
       description: >
@@ -120,6 +140,12 @@ triggers:
     id: went_offline
     entity_id: !input speakers
     to: unavailable
+  - trigger: state
+    id: paused_long
+    entity_id: !input speakers
+    to: paused
+    for:
+      seconds: !input handover_after_pause
   - trigger: time_pattern
     id: sweep
     seconds: /10
@@ -134,6 +160,7 @@ variables:
   speakers: !input speakers
   helper: !input intended_helper
   wired_speakers: !input wired_speakers
+  handover_command: !input handover_command
   log_notify: !input log_notify
   counter_sessions: !input counter_sessions
   counter_left: !input counter_left
@@ -236,7 +263,10 @@ variables:
   session_playing: "{{ (stored.members | select('is_state', 'playing') | list | length) > 0 }}"
   do_repair: "{{ tid in ['back_online', 'sweep'] and session_master is not none and (missing | length) > 0 }}"
   do_forget: "{{ tid == 'went_quiet' and (stored.members | length) > 0 and not session_playing }}"
-  leader: "{{ trig if trigger_is_coordinator else (session_master or '') }}"
+  paused_leader: >-
+    {{ trig if (tid == 'paused_long' and trig and is_state(trig, 'paused')
+                and (trig_group | length) > 0 and trig_group[0] == trig) else '' }}
+  leader: "{{ trig if (trigger_is_coordinator or paused_leader) else (session_master or '') }}"
   source: >-
     {%- set c = ((state_attr(leader, 'media_content_id') or '') if leader else '') | string -%}
     {%- if c.startswith('x-sonos-spotify:') -%}Spotify
@@ -248,6 +278,31 @@ variables:
     {%- else -%}Other
     {%- endif -%}
   wired: "{{ 'n/a' if not wired_speakers else ('yes' if leader in wired_speakers else 'no') }}"
+  handover_target: >-
+    {%- set ns = namespace(t=none) -%}
+    {%- if paused_leader and wired_speakers and paused_leader not in wired_speakers
+          and source not in ['TV', 'Line-in'] -%}
+      {%- for s in trig_group -%}
+        {%- if ns.t is none and s in wired_speakers and not is_state(s, 'unavailable') -%}
+          {%- set ns.t = s -%}
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+    {{ ns.t }}
+  handover_ip: >-
+    {%- set url = (device_attr(device_id(paused_leader), 'configuration_url') or '') if paused_leader else '' -%}
+    {{ url.split('//')[1].split(':')[0].split('/')[0] if '//' in url else '' }}
+  handover_uid: >-
+    {%- set ns = namespace(u='') -%}
+    {%- if handover_target -%}
+      {%- for i in (device_attr(device_id(handover_target), 'identifiers') or []) -%}
+        {%- if i[0] == 'sonos' -%}{%- set ns.u = i[1] -%}{%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+    {{ ns.u }}
+  do_handover: >-
+    {{ handover_target is not none and handover_command not in [none, '']
+       and handover_ip != '' and handover_uid != '' }}
   helper_value: >-
     {%- set start = stored.start if (same_session and stored.start) else now_ts -%}
     {%- set ns = namespace(v=(start | string) ~ '|', first=true, full=false) -%}
@@ -312,8 +367,12 @@ variables:
     {%- if do_forget -%}
       {%- set ns.e = ns.e + [{'event': 'session_end', 'subject': stored.members[0], 'detail': ended}] -%}
     {%- endif -%}
+    {%- if do_handover -%}
+      {%- set ns.e = ns.e + [{'event': 'leader_moved', 'subject': handover_target,
+          'detail': 'from=' ~ paused_leader ~ '; to=' ~ handover_target}] -%}
+    {%- endif -%}
     {{ ns.e }}
-  act: "{{ record or do_repair or do_forget or (log_events | length) > 0 }}"
+  act: "{{ record or do_repair or do_forget or do_handover or (log_events | length) > 0 }}"
 
 conditions:
   - condition: template
@@ -342,6 +401,12 @@ actions:
               entity_id: "{{ helper }}"
             data:
               value: ""
+      - conditions: "{{ do_handover }}"
+        sequence:
+          - action: "{{ handover_command }}"
+            data:
+              ip: "{{ handover_ip }}"
+              uid: "{{ handover_uid }}"
   - repeat:
       for_each: "{{ log_events }}"
       sequence:
