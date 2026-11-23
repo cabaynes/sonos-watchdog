@@ -219,7 +219,11 @@ variables:
   trig: "{{ trigger.entity_id if trigger.entity_id is defined and trigger.entity_id else '' }}"
   trig_group: "{{ (state_attr(trig, 'group_members') or []) if trig else [] }}"
   trigger_is_coordinator: "{{ trig != '' and is_state(trig, 'playing') and (trig_group | length) > 0 and trig_group[0] == trig }}"
-  same_session: "{{ (trig_group | select('in', stored.members) | list | length) > 0 }}"
+  leader_switch: >-
+    {{ tid == 'grew_or_started' and trigger_is_coordinator and (stored.members | length) > 0
+       and stored.members[0] != trig and stored.members[0] not in trig_group
+       and states(stored.members[0]) in ['paused', 'idle'] }}
+  same_session: "{{ (trig_group | select('in', stored.members) | list | length) > 0 and not leader_switch }}"
   new_offline: >-
     {%- set ns = namespace(m=[]) -%}
     {%- set here = trig_group if trigger_is_coordinator else master_group -%}

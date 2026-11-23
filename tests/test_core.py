@@ -102,3 +102,23 @@ def test_idle_sweep_does_not_act(blueprint, speakers7):
     trig = {"id": "sweep"}
     v = render(blueprint, speakers7, playing_group(GROUP4), helper_value=",".join(GROUP4), trigger=trig)
     assert v["act"] is False
+
+
+def test_different_leader_starting_after_old_leader_stopped_is_new_session(blueprint, speakers7):
+    """Live 2026-11-23: Living Room stopped, then Roam+Office started — both were in the old session."""
+    from conftest import MOVE
+    states = {ROAM: make_state("playing", group=[ROAM, O]), O: make_state("playing", group=[ROAM, O]),
+              LR: make_state("paused", group=[LR])}
+    trig = make_trigger("grew_or_started", ROAM, to_state=states[ROAM])
+    v = render(blueprint, speakers7, states, helper_value=f"1000|{LR},{ROAM},{MOVE},{BED},{BATH},{O}", trigger=trig)
+    assert v["new_session"] is True
+    assert v["record"] is True
+    assert [e["event"] for e in v["log_events"]] == ["session_end", "session_start"]
+
+
+def test_resume_after_paused_handover_is_same_session(blueprint, speakers7):
+    """After the lead moved Kitchen → Arc during a pause, pressing play is not a new session."""
+    states = playing_group([LR, K, O, ROAM])
+    trig = make_trigger("grew_or_started", LR, to_state=states[LR])
+    v = render(blueprint, speakers7, states, helper_value=f"1000|{K},{LR},{O},{ROAM}", trigger=trig)
+    assert v["new_session"] is False
