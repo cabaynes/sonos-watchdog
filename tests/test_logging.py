@@ -38,7 +38,7 @@ def test_helper_value_format(blueprint, speakers7):
 def test_legacy_helper_value(blueprint, speakers7):
     legacy = f"{LR},{K}"
     v = render_bp(blueprint, speakers7, {}, helper_value=legacy)
-    assert v["stored"] == {"start": None, "members": [LR, K]}
+    assert v["stored"] == {"start": None, "members": [LR, K], "offline": []}
     paused = {LR: make_state("paused", group=[LR, K]), K: make_state("paused", group=[LR, K])}
     trig = make_trigger("went_quiet", LR, to_state=paused[LR])
     v = render_bp(blueprint, speakers7, paused, helper_value=legacy, trigger=trig, now=NOW)
@@ -60,13 +60,12 @@ def test_helper_truncates_at_entity_boundary(blueprint):
 
 
 def test_events_on_offline_leave(blueprint, speakers7):
+    """An offline drop is logged by speaker_offline (at 10 s), not as speaker_left; settle marks it."""
     st = playing([LR, K, ROAM], **{O: make_state("unavailable")})
     trig = make_trigger("settled", LR, to_state=st[LR], from_state=make_state("playing", group=GROUP4))
     v = render_bp(blueprint, speakers7, st, helper_value=f"{NOW - 600}|" + ",".join(GROUP4), trigger=trig, now=NOW)
-    assert v["log_events"][0] == {"event": "speaker_left", "subject": O,
-                                  "detail": "offline; leader=media_player.living_room"}
-    assert v["log_events"][1]["event"] == "session_change"
-    assert "why=went offline" in v["log_events"][1]["detail"]
+    assert not any(e["event"] == "speaker_left" for e in v["log_events"])
+    assert f"!{O}" in v["helper_value"]
 
 
 def test_events_on_online_leave(blueprint, speakers7):
@@ -81,20 +80,17 @@ def test_events_on_online_leave(blueprint, speakers7):
 def test_events_on_back_online_repair(blueprint, speakers7):
     st = playing([LR, K, ROAM], **{O: make_state("paused", group=[O])})
     trig = make_trigger("back_online", O, to_state=st[O], from_state=make_state("unavailable", last_changed=NOW - 120))
-    v = render_bp(blueprint, speakers7, st, helper_value=f"{NOW - 600}|" + ",".join(GROUP4), trigger=trig, now=NOW)
-    events = [(e["event"], e["detail"]) for e in v["log_events"]]
-    assert events[0] == ("speaker_online", "offline_s=120")
-    assert events[1][0] == "repair" and "path=back_online" in events[1][1]
-    assert events[2] == ("speaker_back", "by=watchdog; away_s=120")
+    v = render_bp(blueprint, speakers7, st, helper_value=f"{NOW - 600}|{LR},{K},!{O},{ROAM}", trigger=trig, now=NOW)
+    assert v["log_events"] == [{"event": "repair", "subject": O, "detail": f"path=back_online; leader={LR}"}]
 
 
 def test_back_online_already_rejoined_by_sonos(blueprint, speakers7):
+    """Sonos put it back itself: no repair (speaker_back is logged by the group-change trigger)."""
     st = playing(GROUP4)
     trig = make_trigger("back_online", O, to_state=st[O], from_state=make_state("unavailable", last_changed=NOW - 30))
-    v = render_bp(blueprint, speakers7, st, helper_value=f"{NOW - 600}|" + ",".join(GROUP4), trigger=trig, now=NOW)
-    events = [(e["event"], e["detail"]) for e in v["log_events"]]
-    assert ("speaker_back", "by=sonos; away_s=30") in events
-    assert not any(e == "repair" for e, _ in events)
+    v = render_bp(blueprint, speakers7, st, helper_value=f"{NOW - 600}|{LR},{K},!{O},{ROAM}", trigger=trig, now=NOW)
+    assert v["do_repair"] is False
+    assert not any(e["event"] == "repair" for e in v["log_events"])
 
 
 def test_session_start_event(blueprint, speakers7):

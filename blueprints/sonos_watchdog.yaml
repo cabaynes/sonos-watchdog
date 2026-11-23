@@ -137,6 +137,10 @@ triggers:
     for:
       seconds: !input recovery_seconds
   - trigger: state
+    id: came_online
+    entity_id: !input speakers
+    from: unavailable
+  - trigger: state
     id: went_offline
     entity_id: !input speakers
     to: unavailable
@@ -180,7 +184,13 @@ variables:
       {%- set start = none -%}
       {%- set m = raw -%}
     {%- endif -%}
-    {{ {'start': start, 'members': m.split(',') | map('trim') | reject('eq', '') | list} }}
+    {%- set ns = namespace(members=[], offline=[]) -%}
+    {%- for x in m.split(',') | map('trim') | reject('eq', '') -%}
+      {%- set e = x[1:] if x.startswith('!') else x -%}
+      {%- set ns.members = ns.members + [e] -%}
+      {%- if x.startswith('!') -%}{%- set ns.offline = ns.offline + [e] -%}{%- endif -%}
+    {%- endfor -%}
+    {{ {'start': start, 'members': ns.members, 'offline': ns.offline} }}
   session_master: >-
     {%- set ns = namespace(m=none) -%}
     {%- for s in speakers -%}
@@ -198,7 +208,7 @@ variables:
   missing: >-
     {%- set ns = namespace(m=[]) -%}
     {%- if session_master -%}
-      {%- for s in stored.members -%}
+      {%- for s in stored.offline -%}
         {%- set g = state_attr(s, 'group_members') or [] -%}
         {%- if s not in master_group and states(s) in ['idle', 'paused'] and (g | length) < 2 -%}
           {%- set ns.m = ns.m + [s] -%}
@@ -210,12 +220,26 @@ variables:
   trig_group: "{{ (state_attr(trig, 'group_members') or []) if trig else [] }}"
   trigger_is_coordinator: "{{ trig != '' and is_state(trig, 'playing') and (trig_group | length) > 0 and trig_group[0] == trig }}"
   same_session: "{{ (trig_group | select('in', stored.members) | list | length) > 0 }}"
+  new_offline: >-
+    {%- set ns = namespace(m=[]) -%}
+    {%- set here = trig_group if trigger_is_coordinator else master_group -%}
+    {%- for s in stored.members -%}
+      {%- set gone = s not in here -%}
+      {%- if gone and s in stored.offline -%}
+        {%- set ns.m = ns.m + [s] -%}
+      {%- elif gone and tid == 'went_offline' and s == trig -%}
+        {%- set ns.m = ns.m + [s] -%}
+      {%- elif gone and tid == 'settled' and trigger_is_coordinator and is_state(s, 'unavailable') -%}
+        {%- set ns.m = ns.m + [s] -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{ ns.m }}
   new_members: >-
     {%- if trigger_is_coordinator -%}
       {%- set ns = namespace(m=trig_group | list) -%}
       {%- if same_session -%}
         {%- for s in stored.members -%}
-          {%- if s not in ns.m and is_state(s, 'unavailable') -%}
+          {%- if s not in ns.m and s in new_offline -%}
             {%- set ns.m = ns.m + [s] -%}
           {%- endif -%}
         {%- endfor -%}
@@ -224,41 +248,29 @@ variables:
     {%- else -%}
       {{ stored.members }}
     {%- endif -%}
-  prev_group: >-
-    {%- if trigger.from_state is defined and trigger.from_state and trigger.from_state.attributes is defined -%}
-      {{ trigger.from_state.attributes.group_members or [] }}
-    {%- else -%}
-      {{ [] }}
-    {%- endif -%}
   departed_online: >-
     {%- set ns = namespace(m=[]) -%}
     {%- if tid == 'settled' and trigger_is_coordinator and same_session -%}
-      {%- for s in prev_group -%}
-        {%- if s not in trig_group and s in stored.members and not is_state(s, 'unavailable') -%}
+      {%- for s in stored.members -%}
+        {%- if s not in trig_group and s not in new_offline -%}
           {%- set ns.m = ns.m + [s] -%}
         {%- endif -%}
       {%- endfor -%}
     {%- endif -%}
     {{ ns.m }}
-  departed_offline: >-
-    {%- set ns = namespace(m=[]) -%}
-    {%- if tid == 'settled' and trigger_is_coordinator and same_session -%}
-      {%- for s in prev_group -%}
-        {%- if s not in trig_group and s in stored.members and is_state(s, 'unavailable') -%}
-          {%- set ns.m = ns.m + [s] -%}
-        {%- endif -%}
-      {%- endfor -%}
-    {%- endif -%}
-    {{ ns.m }}
+  back_in_group: >-
+    {{ (stored.offline | select('in', trig_group) | list) if (trigger_is_coordinator and same_session) else [] }}
   grew: "{{ (new_members | reject('in', stored.members) | list | length) > 0 }}"
   new_session: "{{ trigger_is_coordinator and ((not stored.members) or (not same_session)) }}"
   record: >-
-    {%- if not trigger_is_coordinator -%}
+    {%- if tid == 'went_offline' -%}
+      {{ trig in stored.members and trig not in stored.offline and trig in new_offline }}
+    {%- elif not trigger_is_coordinator -%}
       {{ false }}
     {%- elif tid == 'grew_or_started' -%}
-      {{ new_session or grew }}
+      {{ new_session or grew or (back_in_group | length) > 0 }}
     {%- elif tid == 'settled' -%}
-      {{ (new_members | sort) != (stored.members | sort) }}
+      {{ (new_members | sort) != (stored.members | sort) or (new_offline | sort) != (stored.offline | sort) }}
     {%- else -%}
       {{ false }}
     {%- endif -%}
@@ -306,10 +318,11 @@ variables:
     {{ handover_target is not none and handover_command not in [none, '']
        and handover_ip != '' and handover_uid != '' }}
   helper_value: >-
-    {%- set start = stored.start if (same_session and stored.start) else now_ts -%}
+    {%- set start = stored.start if (stored.start and not new_session) else now_ts -%}
     {%- set ns = namespace(v=(start | string) ~ '|', first=true, full=false) -%}
     {%- for s in new_members -%}
-      {%- set add = s if ns.first else ',' ~ s -%}
+      {%- set e = ('!' ~ s) if s in new_offline else s -%}
+      {%- set add = e if ns.first else ',' ~ e -%}
       {%- if not ns.full and ((ns.v ~ add) | length) <= 255 -%}
         {%- set ns.v = ns.v ~ add -%}
         {%- set ns.first = false -%}
@@ -320,7 +333,7 @@ variables:
     {{ ns.v }}
   helper_full: "{{ (helper_value.split('|', 1)[1].split(',') | length) < (new_members | length) }}"
   away_s: >-
-    {%- if tid == 'back_online' and trigger.from_state is defined and trigger.from_state -%}
+    {%- if tid in ['came_online', 'back_online'] and trigger.from_state is defined and trigger.from_state -%}
       {{ (now_ts - as_timestamp(trigger.from_state.last_changed, now_ts)) | int }}
     {%- else -%}
       {{ 0 }}
@@ -336,38 +349,30 @@ variables:
       {%- endif -%}
       {%- set ns.e = ns.e + [{'event': 'session_start', 'subject': leader,
           'detail': 'leader=' ~ leader ~ '; members=' ~ members_txt ~ '; source=' ~ source ~ '; wired=' ~ wired ~ full}] -%}
-    {%- elif record or departed_online or departed_offline -%}
+    {%- elif trigger_is_coordinator and tid in ['grew_or_started', 'settled'] -%}
       {%- for s in departed_online -%}
         {%- set ns.e = ns.e + [{'event': 'speaker_left', 'subject': s, 'detail': 'online; leader=' ~ leader}] -%}
       {%- endfor -%}
-      {%- for s in departed_offline -%}
-        {%- set ns.e = ns.e + [{'event': 'speaker_left', 'subject': s, 'detail': 'offline; leader=' ~ leader}] -%}
+      {%- for s in back_in_group -%}
+        {%- set ns.e = ns.e + [{'event': 'speaker_back', 'subject': s, 'detail': 'leader=' ~ leader}] -%}
       {%- endfor -%}
-      {%- if grew -%}{%- set ns.why = ns.why + ['grew'] -%}{%- endif -%}
-      {%- if departed_offline -%}{%- set ns.why = ns.why + ['went offline'] -%}{%- endif -%}
-      {%- if departed_online -%}{%- set ns.why = ns.why + ['left on purpose'] -%}{%- endif -%}
-      {%- set ns.e = ns.e + [{'event': 'session_change', 'subject': leader,
-          'detail': 'before=' ~ (stored.members | join(';')) ~ '; after=' ~ members_txt ~ '; why=' ~ (ns.why | join(' + ')) ~ full}] -%}
+      {%- if record and (grew or departed_online) -%}
+        {%- if grew -%}{%- set ns.why = ns.why + ['grew'] -%}{%- endif -%}
+        {%- if departed_online -%}{%- set ns.why = ns.why + ['left on purpose'] -%}{%- endif -%}
+        {%- set ns.e = ns.e + [{'event': 'session_change', 'subject': leader,
+            'detail': 'before=' ~ (stored.members | join(';')) ~ '; after=' ~ members_txt ~ '; why=' ~ (ns.why | join(' + ')) ~ full}] -%}
+      {%- endif -%}
     {%- endif -%}
     {%- if tid == 'went_offline' and trig -%}
       {%- set ns.e = ns.e + [{'event': 'speaker_offline', 'subject': trig,
           'detail': 'in_session=' ~ ('yes' if trig in stored.members else 'no')}] -%}
     {%- endif -%}
-    {%- set real_outage = away_s >= 10 -%}
-    {%- if tid == 'back_online' and trig and real_outage -%}
+    {%- if tid == 'came_online' and trig and away_s >= 10 -%}
       {%- set ns.e = ns.e + [{'event': 'speaker_online', 'subject': trig, 'detail': 'offline_s=' ~ away_s}] -%}
     {%- endif -%}
-    {%- if tid == 'back_online' and trig -%}
-      {%- if real_outage and session_master and trig in master_group -%}
-        {%- set ns.e = ns.e + [{'event': 'speaker_back', 'subject': trig, 'detail': 'by=sonos; away_s=' ~ away_s}] -%}
-      {%- elif do_repair and trig in missing -%}
-        {%- set ns.e = ns.e + [{'event': 'repair', 'subject': missing | join(';'),
-            'detail': 'path=back_online; leader=' ~ session_master}] -%}
-        {%- set ns.e = ns.e + [{'event': 'speaker_back', 'subject': trig, 'detail': 'by=watchdog; away_s=' ~ away_s}] -%}
-      {%- endif -%}
-    {%- endif -%}
-    {%- if tid == 'sweep' and do_repair -%}
-      {%- set ns.e = ns.e + [{'event': 'repair', 'subject': missing | join(';'), 'detail': 'path=sweep; leader=' ~ session_master}] -%}
+    {%- if do_repair -%}
+      {%- set ns.e = ns.e + [{'event': 'repair', 'subject': missing | join(';'),
+          'detail': 'path=' ~ ('sweep' if tid == 'sweep' else 'back_online') ~ '; leader=' ~ session_master}] -%}
     {%- endif -%}
     {%- if do_forget -%}
       {%- set ns.e = ns.e + [{'event': 'session_end', 'subject': stored.members[0], 'detail': ended}] -%}

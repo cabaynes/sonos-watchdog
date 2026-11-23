@@ -6,8 +6,10 @@ diagnostic tools and a write-up of why Sonos multi-room playback drops out.
 ## What it does — and what it can't
 
 **It fixes one thing:** a speaker that **drops off the network** while your group is
-playing (a Wi-Fi blip, a reboot, a power cut) is put back into the group when it comes
-back, usually within a few seconds.
+playing (a Wi-Fi drop, a reboot, a power cut) is put back into the group when it comes
+back — within seconds of Home Assistant noticing it's back. Noticing can take a while: in our
+test, Home Assistant saw a power-cycled speaker again about 5 minutes after it booted, and
+Sonos itself never regrouped it.
 
 **It logs what Home Assistant can see:** every listening session (who led it, which
 speakers, the source), every speaker that leaves a playing group or goes offline, and
@@ -78,10 +80,11 @@ Each event is one line: `time,event,subject,detail`, for example
 | Event | Meaning |
 |---|---|
 | `session_start` / `session_end` | A group started playing / nothing has played for the forget time (with duration). |
-| `session_change` | The session's group changed: grew, a speaker went offline, or one left on purpose. |
-| `speaker_left` | A session speaker left the playing group — `offline` or `online`. |
-| `speaker_offline` / `speaker_online` | Any watched speaker went unavailable / came back (with how long). |
-| `speaker_back` | A speaker that went offline is back in the group — `by=sonos` (Sonos did it) or `by=watchdog`. |
+| `session_change` | The session's group changed: grew, or a speaker was left out on purpose. |
+| `speaker_offline` | A watched speaker has been unavailable for 10 s (`in_session=yes` means it dropped out of your group; the watchdog will bring it back). Shorter blips — Home Assistant shows one during every leader handover — aren't logged. |
+| `speaker_online` | It came back, with how long it was gone. |
+| `speaker_left` | A session speaker left the group while still online — treated as your change, not repaired. |
+| `speaker_back` | A speaker that went offline is back in the group (after a `repair`, or Sonos did it). |
 | `repair` | The watchdog sent a join. |
 | `leader_moved` | During a pause, the lead moved to a wired speaker. |
 

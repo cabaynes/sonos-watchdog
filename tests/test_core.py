@@ -16,14 +16,15 @@ def playing_group(group, **extra):
 
 def test_two_speaker_drop_master_found(blueprint, speakers7):
     states = {LR: make_state("playing", group=[LR]), K: make_state("paused", group=[K])}
-    v = render(blueprint, speakers7, states, helper_value=f"{LR},{K}")
+    v = render(blueprint, speakers7, states, helper_value=f"{LR},!{K}")
     assert v["session_master"] == LR
     assert v["missing"] == [K]
 
 
 def test_paused_member_counts_as_missing(blueprint, speakers7):
+    """A marked (went-offline) speaker that came back 'paused' still counts as missing."""
     states = playing_group([LR, K, ROAM], **{O: make_state("paused", group=[O])})
-    v = render(blueprint, speakers7, states, helper_value=",".join(GROUP4))
+    v = render(blueprint, speakers7, states, helper_value=f"{LR},{K},!{O},{ROAM}")
     assert v["missing"] == [O]
 
 
@@ -45,7 +46,7 @@ def test_online_leaver_dropped_on_settle(blueprint, speakers7):
     v = render(blueprint, speakers7, states, helper_value=",".join(GROUP4), trigger=trig)
     assert v["new_members"] == [LR, K, ROAM]
     assert v["departed_online"] == [O]
-    assert v["departed_offline"] == []
+    assert v["new_offline"] == []
     assert v["record"] is True
 
 
@@ -54,7 +55,7 @@ def test_offline_leaver_kept_on_settle(blueprint, speakers7):
     trig = make_trigger("settled", LR, to_state=states[LR], from_state=make_state("playing", group=GROUP4))
     v = render(blueprint, speakers7, states, helper_value=",".join(GROUP4), trigger=trig)
     assert v["new_members"] == [LR, K, ROAM, O]
-    assert v["departed_offline"] == [O]
+    assert v["new_offline"] == [O]
     assert v["departed_online"] == []
 
 
