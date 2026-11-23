@@ -140,6 +140,8 @@ triggers:
     id: went_offline
     entity_id: !input speakers
     to: unavailable
+    for:
+      seconds: 10  # HA marks a group unavailable for ~2 s during a leader handover; ignore blips
   - trigger: state
     id: paused_long
     entity_id: !input speakers
@@ -351,9 +353,12 @@ variables:
       {%- set ns.e = ns.e + [{'event': 'speaker_offline', 'subject': trig,
           'detail': 'in_session=' ~ ('yes' if trig in stored.members else 'no')}] -%}
     {%- endif -%}
-    {%- if tid == 'back_online' and trig -%}
+    {%- set real_outage = away_s >= 10 -%}
+    {%- if tid == 'back_online' and trig and real_outage -%}
       {%- set ns.e = ns.e + [{'event': 'speaker_online', 'subject': trig, 'detail': 'offline_s=' ~ away_s}] -%}
-      {%- if session_master and trig in master_group -%}
+    {%- endif -%}
+    {%- if tid == 'back_online' and trig -%}
+      {%- if real_outage and session_master and trig in master_group -%}
         {%- set ns.e = ns.e + [{'event': 'speaker_back', 'subject': trig, 'detail': 'by=sonos; away_s=' ~ away_s}] -%}
       {%- elif do_repair and trig in missing -%}
         {%- set ns.e = ns.e + [{'event': 'repair', 'subject': missing | join(';'),

@@ -131,3 +131,17 @@ def test_still_offline_speaker_not_relogged(blueprint, speakers7):
     v = render_bp(blueprint, speakers7, st, helper_value=f"{NOW - 600}|" + ",".join(GROUP4), trigger=trig, now=NOW)
     left = [e["subject"] for e in v["log_events"] if e["event"] == "speaker_left"]
     assert left == [ROAM]
+
+
+def test_short_offline_blip_not_logged(blueprint, speakers7):
+    """A handover makes HA mark speakers unavailable for ~2 s; that must not log as offline/online."""
+    st = playing(GROUP4)
+    trig = make_trigger("back_online", O, to_state=st[O], from_state=make_state("unavailable", last_changed=NOW - 2))
+    v = render_bp(blueprint, speakers7, st, helper_value=f"{NOW - 600}|" + ",".join(GROUP4), trigger=trig, now=NOW)
+    assert v["log_events"] == []
+    assert v["act"] is False
+
+
+def test_went_offline_waits_out_blips(blueprint):
+    trig = next(t for t in blueprint["triggers"] if t["id"] == "went_offline")
+    assert trig["for"]["seconds"] >= 10
