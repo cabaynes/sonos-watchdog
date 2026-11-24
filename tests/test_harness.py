@@ -23,3 +23,11 @@ def test_state_stubs():
     assert out["p"] is True
     assert out["g"] == ["media_player.k"]
     assert out["missing"] == "unknown"
+
+
+def test_undefined_attribute_fails_like_an_ha_warning():
+    import jinja2
+    import pytest
+    bp = {"variables": {"x": "{{ trigger.nope.deeper }}"}}
+    with pytest.raises(jinja2.UndefinedError):
+        render_vars(bp, inputs={}, states={}, trigger={}, now=0)

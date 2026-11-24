@@ -30,7 +30,7 @@ GitHub: https://github.com/cabaynes/sonos-watchdog
 ## What v3 does
 
 - Remembers which speakers belong to the session you started (from the Sonos app, a preset, Sonos Voice, anything).
-- If one goes offline and comes back, it's rejoined within seconds.
+- If one goes offline and comes back, it's rejoined within seconds of Home Assistant noticing — which, for a speaker that lost power, took about 5 minutes after it booted in my test (Sonos itself never regrouped it).
 - If one leaves while still online, it assumes **you** did that (ungrouped it, switched preset) and leaves it alone.
 - Never touches volume and never pulls in a speaker that's busy playing something else.
 - Logs `session_start`, `speaker_left` (offline or online), `speaker_back`, `repair`, `session_end` with who led and the source.

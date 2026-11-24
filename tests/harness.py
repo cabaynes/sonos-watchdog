@@ -37,8 +37,10 @@ def load_blueprint(path) -> dict:
 
 def _native(text: str):
     s = text.strip()
-    if s in ("None", "none", ""):
-        return None if s != "" else ""
+    if s == "None":  # HA turns a rendered None into None; the word "none" stays a string
+        return None
+    if s == "":
+        return ""
     try:
         return ast.literal_eval(s)
     except (ValueError, SyntaxError, MemoryError, RecursionError):
@@ -46,7 +48,8 @@ def _native(text: str):
 
 
 def _env(states: dict, now: float, devices: dict) -> jinja2.Environment:
-    env = jinja2.Environment(undefined=jinja2.ChainableUndefined, extensions=["jinja2.ext.loopcontrols"])
+    # StrictUndefined: any lookup HA would warn about ("Template variable warning") fails the test instead.
+    env = jinja2.Environment(undefined=jinja2.StrictUndefined, extensions=["jinja2.ext.loopcontrols"])
 
     class _StateObj:
         def __init__(self, eid, s):

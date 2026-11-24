@@ -48,3 +48,10 @@ def test_labels_reads_local_file(tmp_path):
     p = tmp_path / "labels.local.json"
     p.write_text(json.dumps({"aa:bb:cc:00:00:01": "Kitchen"}))
     assert labels.load(p) == {"AA:BB:CC:00:00:01": "Kitchen"}
+
+
+def test_labels_malformed_file_warns_and_returns_empty(tmp_path, capsys):
+    p = tmp_path / "labels.local.json"
+    p.write_text("{not json")
+    assert labels.load(p) == {}
+    assert "labels.local.json" in capsys.readouterr().err

@@ -78,3 +78,13 @@ def test_came_online_blip_not_logged(blueprint, speakers7):
     v = render_bp(blueprint, speakers7, st, helper_value=h(*GROUP4), trigger=trig, now=NOW)
     assert v["log_events"] == []
     assert v["act"] is False
+
+
+def test_sweep_waits_for_recovery_delay_after_speaker_returns(blueprint, speakers7):
+    """Don't join a speaker that came back a second ago — it may not accept commands yet."""
+    st = playing([LR, K, ROAM], **{O: make_state("idle", group=[O], last_changed=NOW - 1)})
+    v = render_bp(blueprint, speakers7, st, helper_value=h(LR, K, "!" + O, ROAM), trigger={"id": "sweep"}, now=NOW)
+    assert v["missing"] == []
+    st[O] = make_state("idle", group=[O], last_changed=NOW - 10)
+    v = render_bp(blueprint, speakers7, st, helper_value=h(LR, K, "!" + O, ROAM), trigger={"id": "sweep"}, now=NOW)
+    assert v["missing"] == [O]

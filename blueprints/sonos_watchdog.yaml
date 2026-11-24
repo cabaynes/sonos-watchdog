@@ -159,6 +159,7 @@ triggers:
 variables: &decide
   speakers: !input speakers
   forget_minutes: !input forget_minutes
+  recovery_seconds: !input recovery_seconds
   helper: !input intended_helper
   wired_speakers: !input wired_speakers
   handover_command: !input handover_command
@@ -209,7 +210,10 @@ variables: &decide
     {%- if session_master -%}
       {%- for s in stored.offline -%}
         {%- set g = state_attr(s, 'group_members') or [] -%}
-        {%- if s not in master_group and states(s) in ['idle', 'paused'] and (g | length) < 2 -%}
+        {%- set o = states[s] -%}
+        {%- set settled_s = (now_ts - as_timestamp(o.last_changed, now_ts)) if o else 0 -%}
+        {%- if s not in master_group and states(s) in ['idle', 'paused'] and (g | length) < 2
+              and settled_s >= (recovery_seconds | int) -%}
           {%- set ns.m = ns.m + [s] -%}
         {%- endif -%}
       {%- endfor -%}
