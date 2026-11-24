@@ -40,7 +40,7 @@ def test_legacy_helper_value(blueprint, speakers7):
     v = render_bp(blueprint, speakers7, {}, helper_value=legacy)
     assert v["stored"] == {"start": None, "members": [LR, K], "offline": []}
     paused = {LR: make_state("paused", group=[LR, K]), K: make_state("paused", group=[LR, K])}
-    trig = make_trigger("went_quiet", LR, to_state=paused[LR])
+    trig = {"id": "sweep"}  # forgetting runs on the sweep (state age), since 2026-11-23
     v = render_bp(blueprint, speakers7, paused, helper_value=legacy, trigger=trig, now=NOW)
     ends = [e for e in v["log_events"] if e["event"] == "session_end"]
     assert len(ends) == 1 and "duration=unknown" in ends[0]["detail"]
@@ -114,7 +114,7 @@ def test_went_offline_logged(blueprint, speakers7):
 
 def test_session_end_duration(blueprint, speakers7):
     paused = {LR: make_state("paused", group=[LR, K]), K: make_state("paused", group=[LR, K])}
-    trig = make_trigger("went_quiet", LR, to_state=paused[LR])
+    trig = {"id": "sweep"}  # forgetting runs on the sweep (state age), since 2026-11-23
     v = render_bp(blueprint, speakers7, paused, helper_value=f"{NOW - 3600}|{LR},{K}", trigger=trig, now=NOW)
     assert v["log_events"] == [{"event": "session_end", "subject": LR, "detail": "duration_s=3600"}]
     assert v["do_forget"] is True

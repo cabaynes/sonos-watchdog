@@ -48,9 +48,22 @@ def _native(text: str):
 def _env(states: dict, now: float, devices: dict) -> jinja2.Environment:
     env = jinja2.Environment(undefined=jinja2.ChainableUndefined, extensions=["jinja2.ext.loopcontrols"])
 
-    def st(eid):
-        s = states.get(eid)
-        return s.state if s else "unknown"
+    class _StateObj:
+        def __init__(self, eid, s):
+            self.entity_id, self.state, self.attributes = eid, s.state, s.attributes
+            self.last_changed = datetime.fromtimestamp(s.last_changed, tz=timezone.utc)
+
+    class _States:
+        """HA's `states`: callable (`states('x.y')`) and subscriptable (`states['x.y'].last_changed`)."""
+        def __call__(self, eid):
+            s = states.get(eid)
+            return s.state if s else "unknown"
+
+        def __getitem__(self, eid):
+            s = states.get(eid)
+            return _StateObj(eid, s) if s else None
+
+    st = _States()
 
     def is_state(eid, value):
         cur = st(eid)

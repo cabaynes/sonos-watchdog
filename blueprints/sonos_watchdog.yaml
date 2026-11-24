@@ -155,15 +155,10 @@ triggers:
   - trigger: time_pattern
     id: sweep
     seconds: /10
-  - trigger: state
-    id: went_quiet
-    entity_id: !input speakers
-    from: playing
-    for:
-      minutes: !input forget_minutes
 
-variables:
+variables: &decide
   speakers: !input speakers
+  forget_minutes: !input forget_minutes
   helper: !input intended_helper
   wired_speakers: !input wired_speakers
   handover_command: !input handover_command
@@ -175,6 +170,7 @@ variables:
   tid: "{{ trigger.id if trigger.id is defined else '' }}"
   now_ts: "{{ as_timestamp(now()) | int }}"
   raw: "{{ states(helper) if states(helper) not in ['unknown', 'unavailable'] else '' }}"
+  helper_max: "{{ state_attr(helper, 'max') | int(255) }}"
   stored: >-
     {%- if '|' in raw -%}
       {%- set parts = raw.split('|', 1) -%}
@@ -191,14 +187,17 @@ variables:
       {%- if x.startswith('!') -%}{%- set ns.offline = ns.offline + [e] -%}{%- endif -%}
     {%- endfor -%}
     {{ {'start': start, 'members': ns.members, 'offline': ns.offline} }}
+  anchor: >-
+    {%- set alive = stored.members | reject('in', stored.offline) | list -%}
+    {{ alive[0] if alive else (stored.members[0] if stored.members else '') }}
   session_master: >-
     {%- set ns = namespace(m=none) -%}
     {%- for s in speakers -%}
       {%- set g = state_attr(s, 'group_members') or [] -%}
       {%- if ns.m is none and is_state(s, 'playing') and g and g[0] == s -%}
-        {%- if stored.members and (g | select('in', stored.members) | list | length) > 0 -%}
+        {%- if anchor and anchor in g -%}
           {%- set ns.m = s -%}
-        {%- elif not stored.members and (g | length) > 1 -%}
+        {%- elif not anchor and (g | length) > 1 -%}
           {%- set ns.m = s -%}
         {%- endif -%}
       {%- endif -%}
@@ -219,11 +218,7 @@ variables:
   trig: "{{ trigger.entity_id if trigger.entity_id is defined and trigger.entity_id else '' }}"
   trig_group: "{{ (state_attr(trig, 'group_members') or []) if trig else [] }}"
   trigger_is_coordinator: "{{ trig != '' and is_state(trig, 'playing') and (trig_group | length) > 0 and trig_group[0] == trig }}"
-  leader_switch: >-
-    {{ tid == 'grew_or_started' and trigger_is_coordinator and (stored.members | length) > 0
-       and stored.members[0] != trig and stored.members[0] not in trig_group
-       and states(stored.members[0]) in ['paused', 'idle'] }}
-  same_session: "{{ (trig_group | select('in', stored.members) | list | length) > 0 and not leader_switch }}"
+  same_session: "{{ anchor != '' and anchor in trig_group }}"
   new_offline: >-
     {%- set ns = namespace(m=[]) -%}
     {%- set here = trig_group if trigger_is_coordinator else master_group -%}
@@ -233,7 +228,7 @@ variables:
         {%- set ns.m = ns.m + [s] -%}
       {%- elif gone and tid == 'went_offline' and s == trig -%}
         {%- set ns.m = ns.m + [s] -%}
-      {%- elif gone and tid == 'settled' and trigger_is_coordinator and is_state(s, 'unavailable') -%}
+      {%- elif gone and tid == 'settled' and same_session and is_state(s, 'unavailable') and not state_attr(s, 'restored') -%}
         {%- set ns.m = ns.m + [s] -%}
       {%- endif -%}
     {%- endfor -%}
@@ -265,22 +260,34 @@ variables:
   back_in_group: >-
     {{ (stored.offline | select('in', trig_group) | list) if (trigger_is_coordinator and same_session) else [] }}
   grew: "{{ (new_members | reject('in', stored.members) | list | length) > 0 }}"
-  new_session: "{{ trigger_is_coordinator and ((not stored.members) or (not same_session)) }}"
+  new_session: "{{ trigger_is_coordinator and ((not stored.members) or (not same_session and session_master is none)) }}"
   record: >-
     {%- if tid == 'went_offline' -%}
       {{ trig in stored.members and trig not in stored.offline and trig in new_offline }}
     {%- elif not trigger_is_coordinator -%}
       {{ false }}
     {%- elif tid == 'grew_or_started' -%}
-      {{ new_session or grew or (back_in_group | length) > 0 }}
+      {{ new_session or (same_session and (grew or (back_in_group | length) > 0)) }}
     {%- elif tid == 'settled' -%}
-      {{ (new_members | sort) != (stored.members | sort) or (new_offline | sort) != (stored.offline | sort) }}
+      {{ same_session and ((new_members | sort) != (stored.members | sort) or (new_offline | sort) != (stored.offline | sort)) }}
     {%- else -%}
       {{ false }}
     {%- endif -%}
   session_playing: "{{ (stored.members | select('is_state', 'playing') | list | length) > 0 }}"
   do_repair: "{{ tid in ['back_online', 'sweep'] and session_master is not none and (missing | length) > 0 }}"
-  do_forget: "{{ tid == 'went_quiet' and (stored.members | length) > 0 and not session_playing }}"
+  quiet_s: >-
+    {%- set ns = namespace(q=none) -%}
+    {%- for s in stored.members -%}
+      {%- set o = states[s] -%}
+      {%- if o -%}
+        {%- set age = now_ts - as_timestamp(o.last_changed, now_ts) -%}
+        {%- set ns.q = age if ns.q is none or age < ns.q else ns.q -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{ (ns.q | int) if ns.q is not none else 0 }}
+  do_forget: >-
+    {{ tid == 'sweep' and (stored.members | length) > 0 and not session_playing
+       and quiet_s >= (forget_minutes | int) * 60 }}
   paused_leader: >-
     {{ trig if (tid == 'paused_long' and trig and is_state(trig, 'paused')
                 and (trig_group | length) > 0 and trig_group[0] == trig) else '' }}
@@ -327,7 +334,7 @@ variables:
     {%- for s in new_members -%}
       {%- set e = ('!' ~ s) if s in new_offline else s -%}
       {%- set add = e if ns.first else ',' ~ e -%}
-      {%- if not ns.full and ((ns.v ~ add) | length) <= 255 -%}
+      {%- if not ns.full and ((ns.v ~ add) | length) <= (helper_max | int) -%}
         {%- set ns.v = ns.v ~ add -%}
         {%- set ns.first = false -%}
       {%- else -%}
@@ -371,7 +378,9 @@ variables:
       {%- set ns.e = ns.e + [{'event': 'speaker_offline', 'subject': trig,
           'detail': 'in_session=' ~ ('yes' if trig in stored.members else 'no')}] -%}
     {%- endif -%}
-    {%- if tid == 'came_online' and trig and away_s >= 10 -%}
+    {%- set restored = trigger.from_state is defined and trigger.from_state
+          and trigger.from_state.attributes is defined and trigger.from_state.attributes.restored -%}
+    {%- if tid == 'came_online' and trig and away_s >= 10 and not restored -%}
       {%- set ns.e = ns.e + [{'event': 'speaker_online', 'subject': trig, 'detail': 'offline_s=' ~ away_s}] -%}
     {%- endif -%}
     {%- if do_repair -%}
@@ -393,6 +402,11 @@ conditions:
     value_template: "{{ act }}"
 
 actions:
+  # Queued runs: the variables above were rendered when the trigger fired. Render them again now
+  # that this run is actually starting, so it sees what earlier runs wrote (e.g. offline marks).
+  - variables: *decide
+  - condition: template
+    value_template: "{{ act }}"
   - choose:
       - conditions: "{{ record }}"
         sequence:
