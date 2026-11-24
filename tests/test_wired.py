@@ -4,9 +4,9 @@ from conftest import K, LR, O, ROAM, make_state, make_trigger, render_bp
 GROUP4 = [K, LR, O, ROAM]  # Kitchen leads
 NOW = 1_763_900_000
 DEVICES = {
-    K: {"configuration_url": "http://10.0.0.112:1400/support/review",
+    K: {"configuration_url": "http://192.0.2.12:1400/support/review",
         "identifiers": {("sonos", "RINCON_KITCHEN01400")}},
-    LR: {"configuration_url": "http://10.0.0.166:1400/support/review",
+    LR: {"configuration_url": "http://192.0.2.16:1400/support/review",
          "identifiers": {("sonos", "RINCON_LIVINGROOM01400")}},
 }
 HANDOVER = {"wired_speakers": [LR], "handover_command": "rest_command.sonos_delegate", "handover_after_pause": 30}
@@ -35,7 +35,7 @@ def test_handover_target_when_leader_not_wired(blueprint, speakers7):
 
 def test_handover_ip_uid_from_device_registry(blueprint, speakers7):
     v = render(blueprint, speakers7, paused_group(GROUP4), K)
-    assert v["handover_ip"] == "10.0.0.112"
+    assert v["handover_ip"] == "192.0.2.12"
     assert v["handover_uid"] == "RINCON_LIVINGROOM01400"
 
 
