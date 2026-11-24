@@ -379,7 +379,7 @@ variables: &decide
           'detail': 'in_session=' ~ ('yes' if trig in stored.members else 'no')}] -%}
     {%- endif -%}
     {%- set restored = trigger.from_state is defined and trigger.from_state
-          and trigger.from_state.attributes is defined and trigger.from_state.attributes.restored -%}
+          and trigger.from_state.attributes is defined and trigger.from_state.attributes.get('restored') -%}
     {%- if tid == 'came_online' and trig and away_s >= 10 and not restored -%}
       {%- set ns.e = ns.e + [{'event': 'speaker_online', 'subject': trig, 'detail': 'offline_s=' ~ away_s}] -%}
     {%- endif -%}
